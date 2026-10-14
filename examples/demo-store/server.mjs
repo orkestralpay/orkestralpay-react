@@ -5,7 +5,10 @@
 // Usage: see README.md (configuration by environment variables).
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { normalize } from 'node:path';
+import { normalize, join, dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 export function readConfig(env = process.env) {
 	const port = Number(env.PORT || 4030);
@@ -21,7 +24,9 @@ export function readConfig(env = process.env) {
 		username: env.MERCHANT_API_USERNAME || '',
 		password: env.MERCHANT_API_PASSWORD || '',
 		// Optional, local only: the PSP mock control URL enables the scenario shortcuts (decline, timeout)
-		pspMockUrl: (env.PSP_MOCK_URL || '').replace(/\/+$/, '')
+		pspMockUrl: (env.PSP_MOCK_URL || '').replace(/\/+$/, ''),
+		// Optional, local only: /painel (live view of how each order moved through the payment flow); reads the local Postgres containers
+		panel: env.DEMO_PANEL === '1'
 	};
 	const missing = ['apiUrl', 'checkoutUrl', 'merchantId', 'clientSecret', 'username', 'password'].filter((k) => !config[k]);
 	if (missing.length) throw new Error(`Missing configuration: ${missing.join(', ')}`);
@@ -39,6 +44,9 @@ const SAMPLE = { name: 'Joao', surname: 'Silva', document: '529.982.247-25', ema
 	postal_code: '01001-000', street: 'Praça da Sé', number: '100', details: 'Apto 12', neighborhood: 'Sé', city: 'São Paulo', state: 'SP' };
 // Atalhos de demonstracao: ajustam o mock da Cielo e abrem o checkout de um pedido com os dados de exemplo
 const SCENARIOS = {
+	pequena: { label: 'Compra pequena (R$ 24,90): vai direto para a Cielo', cart: { qty_cafe: 0, qty_caneca: 0, qty_coador: 1 } },
+	cop: { label: 'Compra em pesos colombianos (COP): vai para a Kushki', currency: 'COP', cart: { qty_cafe: 0, qty_caneca: 0, qty_coador: 1 } },
+	grande: { label: 'Compra grande (R$ 158,80): tenta a PayU e, se recusar, cai na Cielo', cart: { qty_cafe: 2, qty_caneca: 1, qty_coador: 0 } },
 	aprovado: { label: 'Pagamento aprovado', mode: 'ok' },
 	recusado: { label: 'Cartão recusado pela Cielo', mode: 'decline' },
 	'sem-resposta': { label: 'Cielo sem resposta (resultado incerto, ~20s)', mode: 'timeout' }
@@ -83,26 +91,33 @@ async function merchantToken(config) {
 	return (await r.json()).access_token;
 }
 
-async function createIntent(config, { cart, amount, f }, ip) {
+// Demo: COP scenario sends a Colombian buyer and a fixed COP 50.000 amount (the catalog is in BRL)
+const COP_BUYER = { name: 'Carlos', surname: 'Gomez', document: '1234567890', email: 'carlos@example.com', phone: '3001234567', postal_code: '110111', street: 'Calle 10', number: '5-20', details: 'Apto 1', neighborhood: 'Centro', city: 'Bogota', state: 'DC' };
+async function createIntent(config, { cart, amount, f }, ip, currency = 'BRL', { card = true, bankSlipProvider } = {}) {
+	const cop = currency === 'COP';
+	if (cop) { amount = 5000000; f = COP_BUYER; }
 	const items = Object.entries(cart).filter(([, q]) => q > 0).map(([id, q]) => `${q}x ${PRODUCTS[id].name}`).join(', ');
 	const r = await fetch(`${config.apiUrl}/v1/payment-intents/${config.merchantId}`, {
 		method: 'POST',
 		headers: { Authorization: `Bearer ${await merchantToken(config)}`, IP: ip, 'Content-Type': 'application/json' },
 		body: JSON.stringify({
-			amount, currency: 'BRL', payment_method: 'CREDIT_CARD', description: `Torra & Cia: ${items}`.slice(0, 200),
+			amount, currency, ...(card ? { payment_method: 'CREDIT_CARD' } : {}), ...(bankSlipProvider ? { bank_slip_provider: bankSlipProvider } : {}), description: `Torra & Cia: ${items}`.slice(0, 200),
 			expiration: new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 19),
 			origin_url: config.publicUrl, ok_url: `${config.publicUrl}/obrigado`, error_url: `${config.publicUrl}/`,
+			// PIX e boleto via WePayments exigem dados do lojista e do produto; sem eles o checkout cai em ERROR
+			beneficiary_sender: { name: 'Torra & Cia', document: '11222333000181', helpdesk: 'contato@example.com' },
+			product_info: { id: 'pedido', title: 'Pedido Torra & Cia', description: items.slice(0, 200), category_id: 'cafe', unit_price: amount, quantity: 1 },
 			client: {
-				name: f.name, surname: f.surname, document_type: 'CPF', document_number: digits(f.document),
+				name: f.name, surname: f.surname, document_type: cop ? 'CC' : 'CPF', document_number: cop ? f.document : digits(f.document),
 				telephone: digits(f.phone), email: f.email,
-				billing_address: { street: f.street, number: f.number, neighborhood: f.neighborhood, country: 'BR', state: f.state,
+				billing_address: { street: f.street, number: f.number, neighborhood: f.neighborhood, country: cop ? 'CO' : 'BR', state: f.state,
 					city: f.city, details: f.details || '-', postal_code: digits(f.postal_code) }
 			}
 		})
 	});
 	const body = await r.json();
 	if (r.status !== 201) throw new Error(`HTTP ${r.status} ${body.message ?? ''}`);
-	console.log(`intent ${body.payment_intent_id} ${brl(amount)} (${items})`);
+	console.log(`intent ${body.payment_intent_id} ${cop ? 'COP ' + amount / 100 : brl(amount)} (${items})`);
 	return body.payment_intent_id;
 }
 
@@ -190,11 +205,155 @@ document.getElementById('sample').addEventListener('click',()=>{const d=${JSON.s
 const ip = (req) => req.socket.remoteAddress?.replace('::ffff:', '') || '127.0.0.1';
 const html = (res, status, body) => res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' }).end(body);
 
+// Local demo only: the payment flow decisions are not exposed by an API, so the panel reads the Postgres containers.
+const psql = (container, db, sql) => new Promise((resolve, reject) =>
+	execFile('docker', ['exec', container, 'psql', '-U', 'ldb_user', '-d', db, '-At', '-c', sql], { timeout: 8000 }, (e, out) => (e ? reject(e) : resolve(out.trim()))));
+
+// The panel starts empty each time the store starts (clean slate for a presentation)
+const PANEL_SINCE = new Date().toISOString();
+
+// Calls whose body carries no order id (Kushki, Payvalida) belong to the latest order created before the call, within 3 minutes
+function callsOf(orderId, orders) {
+	const created = (o) => Date.parse(o.created_at);
+	return pspCalls.filter((c) => {
+		if (c.order) return c.order === orderId;
+		const at = Date.parse(c.at);
+		const owner = orders.filter((o) => created(o) <= at && at <= created(o) + 180000).sort((a, b) => created(b) - created(a))[0];
+		return owner?.id === orderId;
+	});
+}
+
+async function panelData(config) {
+	const orders = await psql('payment-service-db', 'payment_service_db',
+		`select coalesce(json_agg(o), '[]') from (select t.id, t.amount, t.currency, pm.name as method, to_char(t.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at, to_char(t.payment_intent_expires_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as expires_at, s.name as status, t.psp_name as psp, t.description,
+		 (select json_agg(json_build_object('t', to_char(h.create_date, 'HH24:MI:SS'), 'status', ps.name, 'descr', h.description) order by h.create_date)
+		  from payment_status_history h join payment_status ps using (payment_status_id) where h.transaction_id = t.id) as hist
+		 from transaction t join payment_status s using (payment_status_id) left join payment_method pm on pm.payment_method_id = t.payment_method_id
+		 where t.merchant_id = '${config.merchantId}' and t.description like 'Torra & Cia%' and t.created_at >= ('${PANEL_SINCE}'::timestamptz at time zone 'utc') order by t.created_at desc limit 8) o`);
+	// the VALUE rule may sit under other conditions (e.g. currency), so walk the active card flow tree
+	const rule = await psql('management-service-db', 'management_service_db',
+		`with recursive t as (
+		   select r.id, r.rule_type_id, r.condition_value, r.next_rule_if_true_id n1, r.next_rule_if_false_id n2
+		   from payment_flow f join rules r on r.id = f.rule_id join payment_method pm on pm.id = f.payment_method_type_id
+		   where f.active and pm.name = 'CREDIT_CARD' and f.merchant_id = '${config.merchantId}'
+		   union
+		   select r.id, r.rule_type_id, r.condition_value, r.next_rule_if_true_id, r.next_rule_if_false_id from rules r join t on r.id in (t.n1, t.n2))
+		 select t.condition_value from t join rule_type rt using (rule_type_id) where rt.rule = 'VALUE' limit 1`);
+	// name of the active flow per payment method, so the panel can say which flow it is drawing
+	const flowRows = await psql('management-service-db', 'management_service_db',
+		`select coalesce(json_object_agg(pm.name, f.name), '{}') from payment_flow f join payment_method pm on pm.id = f.payment_method_type_id
+		 where f.active and f.merchant_id = '${config.merchantId}'`);
+	const list = JSON.parse(orders);
+	// PSP attempts per order (from the recording proxy; bodies without the order id are attached by time window)
+	for (const o of list) o.attempts = callsOf(o.id, list).map((c) => ({ psp: c.psp, ok: c.ok, text: c.text, path: c.path }));
+	return { threshold: Number(JSON.parse(rule || '["0"]')[0]), flows: JSON.parse(flowRows || '{}'), orders: list };
+}
+
+// Local demo only: recording forward proxy for the PSP calls (integrator -> PSP), so the panel can show what was sent and received.
+// It forwards untouched to the PSP sandbox; only the stored copy is masked (card, CVV, keys, signatures).
+const PSP_TARGETS = {
+	cielo: { write: 'https://apisandbox.cieloecommerce.cielo.com.br', read: 'https://apiquerysandbox.cieloecommerce.cielo.com.br' },
+	payu: { write: 'https://sandbox.api.payulatam.com', read: 'https://sandbox.api.payulatam.com' },
+	kushki: { write: 'https://api-uat.kushkipagos.com', read: 'https://api-uat.kushkipagos.com' },
+	payvalida: { write: 'https://api-test.payvalida.com', read: 'https://api-test.payvalida.com' },
+	wepayments: { write: 'https://api.sandbox.wepayout.com.br', read: 'https://api.sandbox.wepayout.com.br' }
+};
+const pspCalls = [];
+const paymentOwner = new Map(); // Cielo PaymentId -> order id (void and query calls only carry the PaymentId)
+const SECRET_KEY = /^(securitycode|cvv|expirationdate|merchantkey|apikey|apilogin|signature|password|token|cardtoken|publickey)$/i;
+const CARD_KEY = /^(number|cardnumber)$/i;
+const last4 = (n) => `**** **** **** ${String(n).replace(/\D/g, '').slice(-4)}`;
+export function mask(v) {
+	if (Array.isArray(v)) return v.map(mask);
+	if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, CARD_KEY.test(k) && typeof x === 'string' && /^\d{13,19}$/.test(x.replace(/\D/g, '')) && x.replace(/\D/g, '').length === x.replace(/[\s-]/g, '').length ? last4(x) : SECRET_KEY.test(k) ? '***' : mask(x)]));
+	return typeof v === 'string' ? v.replace(/\b\d{13,19}\b/g, (n) => `**** ${n.slice(-4)}`) : v;
+}
+const parse = (t) => { try { return JSON.parse(t); } catch { return t ? String(t).slice(0, 2000) : null; } };
+const dashed = (h) => (/^[0-9a-f]{32}$/i.test(h) ? `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}` : null);
+function summarize(psp, status, res) {
+	if (psp === 'cielo') {
+		if (Array.isArray(res)) return { ok: false, text: res.map((e) => `${e.Code}: ${e.Message}`).join('; ') };
+		const p = res?.Payment;
+		if (p) return { ok: [1, 2].includes(p.Status), text: `Status ${p.Status}${p.ReturnCode ? ` · ${p.ReturnCode}` : ''}${p.ReturnMessage ? ` · ${p.ReturnMessage}` : ''}` };
+	} else {
+		const t = res?.transactionResponse;
+		if (t) return { ok: t.state === 'APPROVED', text: `${t.state}${t.responseCode ? ` · ${t.responseCode}` : ''}${t.paymentNetworkResponseErrorMessage ? ` · ${t.paymentNetworkResponseErrorMessage}` : ''}` };
+		if (res?.code) return { ok: res.code === 'SUCCESS', text: `${res.code}${res.error ? ` · ${res.error}` : ''}` };
+	}
+	const msg = res && typeof res === 'object' ? (res.message ?? res.error ?? res.DESC ?? res.code ?? res.CODE) : null;
+	return { ok: status < 400, text: `HTTP ${status}${msg ? ` · ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`.slice(0, 160) : ''}` };
+}
+async function pspProxy(req, res, raw) {
+	const [, , name, ...rest] = req.url.split('/');
+	const target = PSP_TARGETS[name];
+	if (!target) return res.writeHead(404).end();
+	const path = '/' + rest.join('/');
+	const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !['host', 'content-length', 'connection', 'accept-encoding', 'expect', 'transfer-encoding', 'keep-alive'].includes(k)));
+	const started = Date.now();
+	const reqJson = parse(raw);
+	let status = 502, text = '', ctype = 'application/json';
+	try {
+		const r = await fetch((req.method === 'GET' ? target.read : target.write) + path, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : raw, signal: AbortSignal.timeout(60000) });
+		status = r.status; text = await r.text(); ctype = r.headers.get('content-type') || ctype;
+	} catch (e) { text = JSON.stringify({ proxyError: e.message }); }
+	const resJson = parse(text);
+	const paymentId = name === 'cielo' ? path.match(/^\/1\/sales\/([^/?]+)/)?.[1] : null;
+	let order = reqJson?.MerchantOrderId ?? dashed(reqJson?.transaction?.order?.referenceCode) ?? (paymentId && paymentOwner.get(paymentId)) ?? null;
+	if (!order && reqJson && typeof reqJson === 'object') order = JSON.stringify(reqJson).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] ?? null;
+	if (order && resJson?.Payment?.PaymentId) paymentOwner.set(resJson.Payment.PaymentId, order);
+	pspCalls.push({ id: pspCalls.length + 1, at: new Date().toISOString(), psp: name, method: req.method, path, status, ms: Date.now() - started, order, ...summarize(name, status, resJson), req: mask(reqJson), res: mask(resJson) });
+	if (pspCalls.length > 200) pspCalls.shift();
+	res.writeHead(status, { 'Content-Type': ctype }).end(text);
+}
+
+// PIX / boleto / PSE scenarios: the store creates the order without a method and then selects it, as the checkout does on click
+const METHOD_SCENARIOS = {
+	pix: { methodId: 5, currency: 'BRL' },
+	'boleto-brl': { methodId: 3, currency: 'BRL' },
+	// boleto with a bank_slip_provider only works through the direct payin API: the "choose the method later" flow drops that field
+	'boleto-cop': { methodId: 3, currency: 'COP', bankSlipProvider: 'Efecty', direct: 'CASH' },
+	'pse-cop': { methodId: 4, currency: 'COP' }
+};
+async function launchMethod(config, key, ip) {
+	const sc = METHOD_SCENARIOS[key];
+	const cart = { qty_cafe: 0, qty_caneca: 0, qty_coador: 1 };
+	if (sc.direct) {
+		const id = randomUUID(), amount = 5000000, f = COP_BUYER;
+		const r = await fetch(`${config.apiUrl}/transaction/payin/${config.merchantId}`, {
+			method: 'POST', headers: { Authorization: `Bearer ${await merchantToken(config)}`, IP: ip, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(90000),
+			body: JSON.stringify({ transaction_id: id, amount, currency: sc.currency, description: 'Torra & Cia: boleto em COP', payment_method: sc.direct,
+				expiration: new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 19), bank_slip_provider: sc.bankSlipProvider,
+				beneficiary_sender: { name: 'Torra & Cia', document: '11222333000181', helpdesk: 'contato@example.com' },
+				product_info: { id: 'pedido', title: 'Pedido Torra & Cia', description: 'Cafe', category_id: 'cafe', unit_price: amount, quantity: 1 },
+				client: { name: f.name, surname: f.surname, document_type: 'CC', document_number: f.document, telephone: f.phone, email: f.email,
+					billing_address: { street: f.street, number: f.number, neighborhood: f.neighborhood, country: 'CO', state: f.state, city: f.city, details: f.details, postal_code: f.postal_code } } })
+		});
+		return { id, status: r.status };
+	}
+	const id = await createIntent(config, readOrder({ ...SAMPLE, ...cart }), ip, sc.currency, { card: false, bankSlipProvider: sc.bankSlipProvider });
+	const r = await fetch(`${config.apiUrl}/integrator/transaction/${id}`, { method: 'PUT', headers: { IP: ip, 'Content-Type': 'application/json' }, body: JSON.stringify({ payment_method_id: sc.methodId }), signal: AbortSignal.timeout(90000) });
+	return { id, status: r.status };
+}
+
 export function createStoreServer(config) {
 	return createServer(async (req, res) => {
 	let form = {};
 	try {
-		if (req.method === 'POST' && req.url === '/comprar') {
+		if (config.panel && req.url.startsWith('/psp/')) {
+			let raw = '';
+			for await (const c of req) raw += c;
+			await pspProxy(req, res, raw);
+		} else if (config.panel && req.method === 'POST' && req.url.startsWith('/painel/disparar/')) {
+			const key = req.url.split('/')[3];
+			if (!METHOD_SCENARIOS[key]) return res.writeHead(404).end();
+			const out = await launchMethod(config, key, ip(req));
+			res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(out));
+		} else if (config.panel && req.url.startsWith('/painel/chamadas')) {
+			const order = new URL(req.url, 'http://x').searchParams.get('order');
+			const recent = (await panelData(config)).orders;
+			const mine = callsOf(order, recent);
+			res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(mine));
+		} else if (req.method === 'POST' && req.url === '/comprar') {
 			let raw = '';
 			for await (const c of req) raw += c;
 			form = Object.fromEntries(new URLSearchParams(raw));
@@ -205,10 +364,16 @@ export function createStoreServer(config) {
 		} else if (config.pspMockUrl && req.url.startsWith('/cenario/')) {
 			const sc = SCENARIOS[req.url.split('/')[2]];
 			if (!sc) return html(res, 404, checkoutPage(config, {}, ['Cenário inexistente.']));
-			await fetch(`${config.pspMockUrl}/__mode`, { method: 'POST', body: JSON.stringify({ psp: 'cielo', mode: sc.mode }) });
-			console.log(`cenario: mock cielo = ${sc.mode}`);
-			const id = await createIntent(config, readOrder({ ...SAMPLE, qty_cafe: 1, qty_caneca: 0, qty_coador: 0 }), ip(req));
+			if (sc.mode) {
+				await fetch(`${config.pspMockUrl}/__mode`, { method: 'POST', body: JSON.stringify({ psp: 'cielo', mode: sc.mode }) });
+				console.log(`cenario: mock cielo = ${sc.mode}`);
+			}
+			const id = await createIntent(config, readOrder({ ...SAMPLE, qty_cafe: 1, qty_caneca: 0, qty_coador: 0, ...sc.cart }), ip(req), sc.currency, sc.currency === 'COP' ? { bankSlipProvider: 'Efecty' } : undefined);
 			res.writeHead(303, { Location: `${config.checkoutUrl}/${id}` }).end();
+		} else if (config.panel && req.url === '/painel') {
+			res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(await readFile(join(dirname(fileURLToPath(import.meta.url)), 'painel.html')));
+		} else if (config.panel && req.url === '/painel/dados') {
+			res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(await panelData(config)));
 		} else if (req.url === '/obrigado') {
 			html(res, 200, page('Pedido recebido · Torra & Cia', '<h1>Obrigado!</h1><p>Recebemos seu pedido.</p><a href="/">Voltar à loja</a>'));
 		} else {

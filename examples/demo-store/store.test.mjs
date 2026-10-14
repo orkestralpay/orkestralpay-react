@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, test } from 'vitest';
 
-import { readConfig, readOrder, validCpf } from './server.mjs';
+import { mask, readConfig, readOrder, validCpf } from './server.mjs';
 
 const buyer = {
   name: 'Maria', surname: 'Souza', document: '529.982.247-25', email: 'maria@example.com', phone: '(11) 98888-7777',
@@ -33,5 +33,14 @@ describe('demo store', () => {
 
   test('requires the merchant credentials and URLs', () => {
     expect(() => readConfig({})).toThrow('Missing configuration');
+  });
+
+  test('masks card number, CVV, expiry and PSP keys in the recorded PSP calls', () => {
+    const out = mask({ merchant: { apiKey: 'k', apiLogin: 'l' }, creditCard: { number: '4097440000000004', securityCode: '123', expirationDate: '2030/12', name: 'APPROVED' },
+      Payment: { CreditCard: { CardNumber: '4024007197692931', SecurityCode: '123' } }, note: 'cartao 4097440000000004' });
+    const text = JSON.stringify(out);
+    expect(text).not.toMatch(/4097440000000004|4024007197692931|"123"|2030\/12/);
+    expect(out.creditCard.number).toBe('**** **** **** 0004');
+    expect(out.creditCard.name).toBe('APPROVED');
   });
 });

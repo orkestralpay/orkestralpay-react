@@ -21,6 +21,7 @@ The merchant secret and the order total never reach the browser. This is example
 | `MERCHANT_API_USERNAME` / `MERCHANT_API_PASSWORD` | yes | An API user of that merchant |
 | `PUBLIC_URL` | no | Public URL of this store (used in `ok_url`/`error_url`). Defaults to `http://localhost:{PORT}` |
 | `PSP_MOCK_URL` | no | Local only: PSP mock control URL. Enables the scenario shortcuts (approved, declined, PSP timeout) |
+| `DEMO_PANEL` | no | Local only: `1` enables `/painel`, a live view of how each order went through the merchant payment flow (PSP attempts, fallback, and the request/response sent to each PSP, masked). It reads the local Postgres containers through `docker exec` and records PSP calls when the services point their PSP URLs to `/psp/<psp>` on this store. Not for shared environments as is. |
 | `PORT` | no | Defaults to `4030` |
 
 The sandbox merchant needs, in the Orkestral portal: an active agreement with a PSP that accepts credit card in Brazil (sandbox credentials), a credit card fee, an active payment flow for `CREDIT_CARD`, and its public key (generated at sign-up).

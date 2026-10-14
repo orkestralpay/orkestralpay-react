@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Painel ao vivo · Orkestral</title>
+<style>
+:root{--bg:#0e1411;--panel:#16201b;--line:#27362e;--fg:#e6efe9;--muted:#8da396;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--cyan:#5eead4;--idle:#3a4a41}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#17382c 0,var(--bg) 60%);color:var(--fg);font:15px/1.5 "Segoe UI",system-ui,sans-serif;min-height:100vh}
+header{display:flex;justify-content:space-between;align-items:center;padding:18px 28px;border-bottom:1px solid var(--line)}
+header h1{font:600 20px/1 Georgia,serif;margin:0;letter-spacing:.02em}header small{color:var(--muted);display:block;font:12px system-ui;margin-top:4px}
+.live{display:flex;align-items:center;gap:8px;font:600 12px system-ui;letter-spacing:.1em;color:var(--ok)}
+.live i{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 #4ade8099;animation:pulse 1.6s infinite}
+@keyframes pulse{70%{box-shadow:0 0 0 10px #4ade8000}100%{box-shadow:0 0 0 0 #4ade8000}}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px);gap:20px;padding:20px 28px;align-items:start}
+main>*{min-width:0}
+@media(max-width:1100px){main{grid-template-columns:minmax(0,1fr)}aside{position:static}}
+@media(max-width:1500px){header{padding:12px 18px}main{padding:14px 16px;gap:14px}.kpis{gap:8px;margin-bottom:0}.kpi{padding:10px 14px}.kpi b{font-size:22px}.card{padding:14px}.verdict{padding:10px 12px;min-height:0}.verdict b{font-size:15px}.ord{padding:9px 11px}.ord b{font-size:16px}pre{font-size:11px;max-height:220px}.go a{padding:8px 10px;font-size:13px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card h2{margin:0 0 4px;font:600 13px system-ui;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;grid-column:1/-1}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 18px}
+.kpi b{display:block;font:600 30px/1.1 Georgia,serif}.kpi span{color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.kpi.ok b{color:var(--ok)}.kpi.warn b{color:var(--warn)}
+svg{width:100%;height:auto;display:block}
+.edge{fill:none;stroke:var(--idle);stroke-width:3;stroke-linecap:round}
+.edge.dash{stroke-dasharray:7 7}
+.edge.on{stroke:var(--cyan);filter:drop-shadow(0 0 6px var(--cyan));stroke-dasharray:none}
+.edge.on.dash{stroke-dasharray:7 7;animation:flow .8s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-14}}
+.edge.bad{stroke:var(--bad);filter:drop-shadow(0 0 6px var(--bad))}
+.node rect,.node polygon{fill:#1a2a22;stroke:var(--idle);stroke-width:2;transition:all .4s}
+.node text{fill:var(--muted);font:600 15px system-ui;text-anchor:middle;transition:fill .4s}
+.node .sub{font:12px system-ui;fill:var(--muted)}
+.node.on rect,.node.on polygon{stroke:var(--cyan);fill:#10332d;filter:drop-shadow(0 0 8px #5eead455)}.node.on text{fill:#fff}
+.node.ok rect{stroke:var(--ok);fill:#12361f;filter:drop-shadow(0 0 12px #4ade8088)}.node.ok text{fill:#fff}
+.node.bad rect{stroke:var(--bad);fill:#3a1a1a;filter:drop-shadow(0 0 12px #f8717188)}.node.bad text{fill:#fff}
+.node.warn rect{stroke:var(--warn);fill:#33290f}.node.warn text{fill:#fff}.chips .w{color:var(--warn);border-color:#5a4a1a}
+.node.wait rect{stroke:var(--warn);animation:blink 1s infinite}
+@keyframes blink{50%{stroke-opacity:.25}}
+.tag{font:700 11px system-ui;letter-spacing:.08em}.tag.s{fill:var(--cyan)}.tag.n{fill:var(--muted)}
+.verdict{margin-top:14px;padding:14px 16px;border-radius:12px;background:#0f1a15;border:1px solid var(--line);min-height:76px}
+.verdict b{font-size:17px}.verdict .why{color:var(--muted);margin-top:4px}
+.feed{display:flex;flex-direction:column;gap:10px}
+aside{position:sticky;top:12px;min-width:0;max-height:calc(100vh - 24px);overflow-y:auto;display:flex;flex-direction:column;gap:14px}aside .card{margin:0}
+svg{max-height:46vh}
+.ord{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#121c17;cursor:pointer;transition:border-color .3s,transform .3s}
+.ord.sel{border-color:var(--cyan)}.ord.new{animation:pop .6s}
+@keyframes pop{from{transform:translateY(-10px);opacity:0}}
+.ord .top{display:flex;justify-content:space-between;align-items:center}.ord b{font:600 18px Georgia,serif}
+.chip{font:700 11px system-ui;padding:3px 9px;border-radius:99px;letter-spacing:.06em}
+.chip.APPROVED{background:#12361f;color:var(--ok)}.chip.ERROR,.chip.DENIED{background:#3a1a1a;color:var(--bad)}.chip.WAITING_CUSTOMER_PAYMENT{background:#3a3010;color:var(--warn)}.flowhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}.tabs button{font:600 12px system-ui;color:var(--muted);background:#121c17;border:1px solid var(--line);border-radius:99px;padding:5px 12px;cursor:pointer}
+.tabs button.on{color:#fff;border-color:var(--cyan);background:#10332d}
+.flowname{font-size:13px;color:var(--muted)}.flowname b{color:var(--fg)}.flowname span{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:99px;background:#16241d;border:1px solid var(--line);font-size:12px}
+.chip.WAITING_PSP_PAYMENT{background:#3a3010;color:var(--warn)}.go button{display:block;width:100%;text-align:left;font:inherit;color:var(--fg);background:#1b2c24;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;cursor:pointer}.go button:hover{border-color:var(--cyan)}.go button:disabled{opacity:.5;cursor:wait}.go button small{display:block;color:var(--muted)}.go h3{margin:8px 0 0;font:600 11px system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.chips span{padding:4px 10px;border-radius:99px;background:#16241d;border:1px solid var(--line);font-size:13px}.chips .x{color:var(--bad);border-color:#5a2a2a}.chips .v{color:var(--ok);border-color:#1f5a33}.chip.EXPIRED{background:#222d27;color:var(--muted)}.ord.exp{opacity:.55}
+.ord .path{margin-top:8px;font-size:13px;color:var(--muted)}.ord .path em{font-style:normal;color:var(--fg)}
+.x{color:var(--bad)}.v{color:var(--ok)}
+.go{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0}.go h2,.go h3,.go .hint{grid-column:1/-1}
+.go a{display:block;text-decoration:none;color:var(--fg);background:#1b2c24;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px}.go a:hover{border-color:var(--cyan)}.go small{display:block;color:var(--muted)}
+.hint{color:var(--muted);font-size:12px;margin-top:6px}
+.cov{grid-column:1/-1;position:relative;z-index:3}.cov h2{margin-bottom:10px}.cov table{width:100%;border-collapse:collapse;font-size:13.5px}
+.cov th{text-align:left;font:600 11px system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line)}
+.cov td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}.cov tr:last-child td{border-bottom:0}
+.cov td:first-child{font-weight:700;white-space:nowrap}.cov .obs{color:var(--muted)}.cov .obs b{color:var(--fg)}
+.st{display:inline-block;font:700 11px system-ui;letter-spacing:.06em;padding:3px 9px;border-radius:99px;white-space:nowrap}
+.st.ok{background:#12361f;color:var(--ok)}.st.part{background:#3a3010;color:var(--warn)}.st.blk{background:#3a1a1a;color:var(--bad)}.st.nt{background:#222d27;color:var(--muted)}
+.fixed{margin-top:14px;padding:12px 14px;background:#0f1a15;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:13px}.fixed b{color:var(--fg)}
+.fixed ul{margin:6px 0 0;padding-left:18px}.fixed li{margin:3px 0}
+.log{margin-top:16px}.log h3{margin:0 0 8px;font:600 13px system-ui;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.tl{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}.tl span{font-size:12px;background:#0f1a15;border:1px solid var(--line);border-radius:8px;padding:4px 8px}.tl em{font-style:normal;color:var(--muted)}
+details.call{border:1px solid var(--line);border-radius:10px;background:#0f1a15;margin-bottom:8px}
+details.call>summary{cursor:pointer;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;list-style:none}
+details.call>summary::-webkit-details-marker{display:none}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}
+.call .psp{font-weight:700}.call .meta{color:var(--muted);font:12px ui-monospace,Consolas,monospace}.call .res{margin-left:auto;font-weight:600}.call .res.bad{color:var(--bad)}.call .res.ok{color:var(--ok)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:10px;padding:0 12px 12px}.cols>div{min-width:0}
+.cols h4{margin:0 0 4px;font:600 11px system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+pre{margin:0;max-width:100%;background:#0a110d;border:1px solid var(--line);border-radius:8px;padding:10px;font:12px/1.45 ui-monospace,Consolas,monospace;color:#cfe3d6;overflow:auto;max-height:280px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Orkestral · roteamento de pagamento ao vivo</h1><small>fluxo de pagamento do merchant · atualiza sozinho</small></div>
+  <div class="live"><i></i>AO VIVO</div>
+</header>
+<main>
+  <div class="kpis">
+    <div class="kpi"><b id="k-total">0</b><span>pedidos</span></div>
+    <div class="kpi ok"><b id="k-ok">0</b><span>aprovados</span></div>
+    <div class="kpi warn"><b id="k-fb">0</b><span>caíram no fallback</span></div>
+    <div class="kpi"><b id="k-psp">–</b><span>quem mais cobrou</span></div>
+  </div>
+
+  <section class="card">
+    <h2>Caminho do pedido pelo fluxo</h2>
+    <div class="flowhead"><div class="tabs" id="tabs"><button data-m="CREDIT_CARD">Cartão de Crédito</button><button data-m="PIX">Pix</button><button data-m="CASH">Dinheiro (boleto)</button><button data-m="TRANSFER">Transferência bancária</button></div><div class="flowname" id="flowname"></div></div>
+    <div id="flow-other" style="display:none"><svg viewBox="0 0 1100 250" id="svg2"></svg></div>
+    <div id="flow-card"><svg viewBox="0 0 1100 400" id="svg">
+      <path id="e-start-moeda" class="edge" d="M140 187 H180"/>
+      <path id="e-moeda-valor" class="edge" d="M320 187 C 365 187 365 120 410 120"/>
+      <path id="e-moeda-kushki" class="edge" d="M250 227 C 250 360 560 356 880 356"/>
+      <path id="e-valor-band" class="edge" d="M550 120 C 590 120 590 80 630 80"/>
+      <path id="e-valor-cieloA" class="edge" d="M480 150 C 480 270 700 288 880 288"/>
+      <path id="e-band-payu" class="edge" d="M770 80 C 825 80 825 44 880 44"/>
+      <path id="e-band-cieloB" class="edge" d="M700 110 C 700 190 790 197 880 197"/>
+      <path id="e-payu-cieloF" class="edge dash" d="M950 70 V 128"/>
+      <text class="tag s" x="352" y="160">SIM</text><text class="tag n" x="256" y="286">NÃO (COP)</text>
+      <text class="tag s" x="592" y="108">SIM</text><text class="tag n" x="470" y="218">NÃO</text>
+      <text class="tag s" x="822" y="58">SIM</text><text class="tag n" x="736" y="178">NÃO</text>
+      <text class="tag n" x="962" y="104" id="t-fb">se recusar</text>
+
+      <g class="node" id="n-start"><rect x="20" y="160" width="120" height="54" rx="12"/><text x="80" y="182">Compra</text><text class="sub" x="80" y="200" id="s-start">aguardando…</text></g>
+      <g class="node" id="n-moeda"><polygon points="250,147 320,187 250,227 180,187"/><text x="250" y="183">Moeda</text><text class="sub" x="250" y="201">é BRL ?</text></g>
+      <g class="node" id="n-valor"><polygon points="480,90 550,120 480,150 410,120"/><text x="480" y="117" id="valor-l1">Valor ></text><text class="sub" x="480" y="134" id="valor-l2">R$ 0,00 ?</text></g>
+      <g class="node" id="n-band"><polygon points="700,50 770,80 700,110 630,80"/><text x="700" y="77">Bandeira</text><text class="sub" x="700" y="94">é Visa ?</text></g>
+      <g class="node" id="n-payu"><rect x="880" y="18" width="140" height="52" rx="12"/><text x="950" y="40">PayU</text><text class="sub" x="950" y="58" id="s-payu">1ª opção</text></g>
+      <g class="node" id="n-cieloF"><rect x="880" y="128" width="140" height="52" rx="12"/><text x="950" y="150">Cielo</text><text class="sub" x="950" y="168">fallback</text></g>
+      <g class="node" id="n-cieloB"><rect x="880" y="197" width="140" height="52" rx="12"/><text x="950" y="219">Cielo</text><text class="sub" x="950" y="237">outra bandeira</text></g>
+      <g class="node" id="n-cieloA"><rect x="880" y="262" width="140" height="52" rx="12"/><text x="950" y="284">Cielo</text><text class="sub" x="950" y="302">compra pequena</text></g>
+      <g class="node" id="n-kushki"><rect x="880" y="330" width="140" height="52" rx="12"/><text x="950" y="352">Kushki</text><text class="sub" x="950" y="370">pesos colombianos</text></g>
+    </svg></div>
+    <div class="verdict" id="verdict"><b>Aguardando a primeira compra…</b><div class="why">Faça uma compra na loja e acompanhe aqui.</div></div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <aside><section class="card"><h2>Pedidos</h2><div class="feed" id="feed"></div></section>
+    <section class="card go">
+      <h2>Disparar uma compra</h2>
+      <a href="/cenario/pequena" target="_blank">▶ Compra pequena<small>R$ 24,90 · vai direto para a Cielo</small></a>
+      <a href="/cenario/cop" target="_blank">▶ Compra em pesos colombianos<small>COP 50.000 · vai para a Kushki · cartão 4000 0000 0000 0002</small></a>
+      <a href="/cenario/grande" target="_blank">▶ Compra grande<small>R$ 158,80 · tenta a PayU, cai na Cielo se recusar</small></a>
+      <h3>Boleto e PSE em pesos (sem passar pelo checkout)</h3>
+      <button data-k="boleto-cop"><b>▶ Boleto em pesos</b><small>COP 50.000 · Payvalida (rede Efecty)</small></button>
+      <button data-k="pse-cop"><b>▶ PSE (transferência)</b><small>COP 50.000 · Payvalida, depois Kushki</small></button>
+      <div class="hint">No checkout: Cartão de Crédito → <b>4097 4400 0000 0004</b> · 12/30 · 123</div>
+    </section>
+  </aside>
+  <section class="card cov">
+    <h2>Cobertura por PSP · o que funciona e o que depende de quem</h2>
+    <table>
+      <tr><th>PSP · meio</th><th>Moeda</th><th>Situação</th><th>Observação</th></tr>
+      <tr><td>Cielo · cartão</td><td>BRL</td><td><span class="st ok">FUNCIONA</span></td><td class="obs">Aprova no <b>sandbox real</b> da Cielo. Estorno e aviso de pagamento (webhook) só foram vistos no mock: o webhook deles não chega em <i>localhost</i>.</td></tr>
+      <tr><td>Kushki · cartão</td><td>COP</td><td><span class="st ok">FUNCIONA</span></td><td class="obs">Aprovou no <b>UAT</b> da Kushki (código de aprovação devolvido). Só tínhamos conta da Colômbia.</td></tr>
+      <tr><td>Kushki · boleto / efectivo</td><td>COP</td><td><span class="st ok">FUNCIONA</span></td><td class="obs">Token e cobrança aceitos pelo UAT. O pagamento em si só é confirmado por webhook (precisa de endereço público).</td></tr>
+      <tr><td>PayU · cartão</td><td>BRL</td><td><span class="st part">INTEGRADO · RECUSA</span></td><td class="obs">Chega até a PayU e ela responde <b>DECLINED · CONTACT_THE_ENTITY</b> no sandbox (resposta dela, visível no log). <b>Falta dos deles:</b> um cartão de teste do Brasil que aprove. Por isso o fluxo cai na Cielo.</td></tr>
+      <tr><td>WePayments · PIX e boleto</td><td>BRL</td><td><span class="st blk">BLOQUEADO PELO PSP</span></td><td class="obs">A chave é reconhecida, mas o sandbox responde <b>401 · The provided IP is not allowed</b>. <b>Falta dos deles:</b> liberar na conta o IP público da máquina que faz os testes.</td></tr>
+      <tr><td>Payvalida · boleto</td><td>COP</td><td><span class="st ok">FUNCIONA</span></td><td class="obs">Boleto criado no sandbox da Payvalida (rede Efecty, <b>CODE 0000 · CREADA</b>, referência e vencimento gravados). Só o pagamento depende de webhook. Ao corrigir a coluna do número do boleto, caiu a cobrança duplicada que fazia o fluxo chamar a Kushki também.</td></tr>
+      <tr><td>Payvalida · PSE</td><td>COP</td><td><span class="st part">PARCIAL</span></td><td class="obs">Ordem criada com sucesso, mas o PSE exige <b>banco e documento</b> do comprador (escolhidos na tela de checkout) e um catálogo de bancos de sandbox, que não temos local. O botão mostra exatamente o que falta (e nenhuma ordem é criada no PSP).</td></tr>
+      <tr><td>Kushki · transferência</td><td>COP</td><td><span class="st nt">NÃO TESTADO</span></td><td class="obs">Exige <b>transfer_information</b> (banco, documento, URL de retorno) vinda do checkout.</td></tr>
+      <tr><td>Carteiras (wallets)</td><td>—</td><td><span class="st nt">NÃO TESTADO</span></td><td class="obs">Sem fluxo de teste montado.</td></tr>
+      <tr><td>Estorno e webhooks · todos</td><td>—</td><td><span class="st nt">NÃO TESTADO</span></td><td class="obs">Os PSPs só avisam por webhook, e <i>localhost</i> não é alcançável de fora. Precisa de um túnel público. O estorno da Cielo foi testado apenas no mock.</td></tr>
+    </table>
+    <div class="fixed"><b>Problemas nossos que o log expôs e já foram corrigidos hoje</b>
+      <ul>
+        <li><b>PayU:</b> usuário e chave da API estavam <b>trocados</b> no pagamento com cartão (sempre "credenciais inválidas").</li>
+        <li><b>PayU e Kushki:</b> formato da validade do cartão (MM/AAAA contra MM/AA) rejeitado por cada PSP.</li>
+        <li><b>Cielo:</b> a data de nascimento ausente era enviada como o texto "null".</li>
+        <li><b>Payvalida e Kushki:</b> campo obrigatório ausente estourava erro interno com mensagem <i>null</i>; agora diz qual campo falta.</li>
+        <li><b>Credenciais:</b> credenciais falsas antigas ficavam à frente das reais (o sistema usa a primeira que encontra).</li>
+        <li><b>Taxas:</b> um PSP sem taxa cadastrada para o meio não aparecia no editor de fluxo.</li>
+        <li><b>Rede do boleto:</b> no fluxo "criar o pedido e escolher o meio depois", a rede do boleto (ex.: Efecty) não era guardada, e a Payvalida respondia "bank_slip.provider is required". Agora é guardada (migração V46).</li>
+        <li><b>Status parado:</b> depois de o PSP criar a cobrança, só a Kushki avançava o status. Nos demais o pedido ficava em "aguardando meio de pagamento" para sempre. Agora vai para "aguardando o comprador pagar".</li>
+        <li><b>Checkout:</b> boleto por rede de pagamento (Payvalida) e efectivo (Kushki) não têm linha digitável, e o checkout voltava para a tela de seleção. Agora mostra o número de referência, o convênio e o vencimento.</li>
+        <li><b>PSE da Payvalida:</b> o sistema criava a ordem no PSP <i>antes</i> de checar os dados do comprador, deixando uma ordem órfã quando faltava banco ou documento. Agora valida antes de chamar o PSP.</li>
+        <li><b>Boleto da Payvalida:</b> o número do boleto (11 dígitos) estourava a coluna <i>integer</i> do banco. O boleto já tinha sido criado no PSP, o erro era tratado como falha e o fluxo <b>cobrava de novo na Kushki</b>. Coluna ampliada para <i>bigint</i> (migração V45).</li>
+      </ul></div>
+    <div class="fixed"><b>Problemas nossos ainda abertos</b>
+      <ul>
+        <li>Quando <b>todos</b> os PSPs do fluxo recusam o pedido na validação, a escolha do meio responde <b>201 (sucesso)</b> com o pedido parado em "aguardando meio de pagamento", sem nenhuma cobrança feita.</li>
+        <li>O validador exige os campos de <b>todos</b> os PSPs do fluxo (ex.: dados do lojista da WePayments) mesmo quando a cobrança vai para outro.</li>
+        <li>Cartão aprovado pela tela do checkout não avisa o lojista (notificação).</li>
+        <li>Editar um fluxo no editor visual dá erro 422 quando o fluxo já tem PSPs.</li>
+      </ul></div>
+    <div class="hint">Testado em 09/10/2026 no ambiente local, contra os sandboxes de cada PSP. Os cartões de teste e os dados do comprador são fictícios.</div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const brl = (c, cur = 'BRL') => (c / 100).toLocaleString(cur === 'COP' ? 'es-CO' : 'pt-BR', { style: 'currency', currency: cur, currencyDisplay: cur === 'COP' ? 'code' : 'symbol', maximumFractionDigits: cur === 'COP' ? 0 : 2 });
+const NODES = ['start','moeda','valor','band','payu','cieloF','cieloB','cieloA','kushki'];
+const EDGES = ['start-moeda','moeda-valor','moeda-kushki','valor-band','valor-cieloA','band-payu','band-cieloB','payu-cieloF'];
+let selected = null, pinned = null, seen = new Set(), last = '', data = { orders: [], threshold: 0, flows: {} };
+
+// Reconstroi o caminho de um pedido a partir do historico de status e do PSP final.
+function analyse(o, threshold) {
+  const hist = o.hist || [];
+  const failed = hist.filter((h) => h.status === 'ERROR' && h.descr).map((h) => (h.descr.match(/^(PayU|Cielo)/i) || [])[1]).filter(Boolean);
+  const done = o.status === 'APPROVED', waiting = o.status === 'WAITING_CUSTOMER_PAYMENT';
+  // pedido que passou do prazo sem nenhuma tentativa de cobranca: nao e "aguardando", expirou
+  if (waiting && !failed.length && o.expires_at && Date.parse(o.expires_at) < Date.now()) {
+    return { nodes: { start: 'on' }, edges: {}, why: 'O comprador não pagou dentro do prazo do link (10 minutos). Nenhuma chamada foi feita a PSP.', title: 'Pedido expirou sem pagamento', done: false, waiting: false, expired: true, fallback: false, path: ['Expirado'] };
+  }
+  if (o.method && o.method !== 'CREDIT_CARD') {
+    const name = { payu: 'PayU', cielo: 'Cielo', kushki: 'Kushki', payvalida: 'Payvalida', wepayments: 'WePayments' };
+    const lab = ({ PIX: 'PIX', CASH: 'Boleto', TRANSFER: 'PSE / transferência', WALLETS: 'Carteira' })[o.method] || o.method;
+    // varias chamadas ao mesmo PSP (ex.: lista de redes + ordem) contam como uma tentativa dele
+    const at = [];
+    for (const x of o.attempts || []) { const prev = at.find((y) => y.psp === x.psp); if (prev) { prev.ok = prev.ok && x.ok; if (!x.ok) prev.text = x.text; } else at.push({ ...x }); }
+    // PSP que falhou ANTES de ser chamado (validacao nossa): so aparece no erro registrado do historico, entao entra como tentativa falha
+    for (const h of (o.hist || []).filter((h) => h.status === 'ERROR' && h.descr)) {
+      const m = h.descr.match(/payvalida|kushki|wepayments|payu|cielo/i);
+      const k = m && m[0].toLowerCase();
+      if (k && !at.some((y) => y.psp === k)) at.unshift({ psp: k, ok: false, text: 'não chegou a ser chamado · ' + h.descr.replace(/^Error while sending transaction request to Payment Service Provider Exception Message: /, '') });
+    }
+    const created = ['WAITING_PSP_PAYMENT', 'WAITING_CUSTOMER_PAYMENT', 'APPROVED'].includes(o.status);
+    const partial = o.status === 'ERROR';  // chamada HTTP ok, mas a cobranca nao foi concluida
+    const last = at[at.length - 1];
+    return { nodes: { start: 'on' }, edges: {}, nonCard: true, done: o.status === 'APPROVED', waiting: false, expired: false, fallback: at.length > 1 && created,
+      title: created ? `${lab}: cobrança criada` : o.status === 'ERROR' ? `${lab}: nenhum PSP criou a cobrança` : 'Processando…',
+      why: (at.length ? at.map((x) => `${name[x.psp] || x.psp}: ${x.text}${x.ok && partial ? ' (a chamada deu certo, mas a cobrança não foi concluída)' : ''}`).join(' · ') : 'Nenhuma chamada foi feita ao PSP.') +
+        ((o.hist || []).filter((h) => h.status === 'ERROR' && h.descr).slice(-1).map((h) => ` · Erro registrado: ${h.descr.replace(/^Error while sending transaction request to Payment Service Provider Exception Message: /, '')}`)[0] || ''),
+      partial,
+      path: [`${lab} · ${o.currency}`, ...at.map((x) => `${name[x.psp] || x.psp} ${x.ok ? (partial ? '⚠' : '✓') : '✗'}`)] };
+  }
+  const big = o.amount / 100 > threshold && (o.currency || 'BRL') === 'BRL';
+  const triedPayu = failed.some((f) => /payu/i.test(f)) || /payu/i.test(o.psp || '');
+  const nodes = { start: 'on' }, edges = {};
+  nodes.moeda = 'on'; edges['start-moeda'] = 1;
+  let why = '', title = '';
+  const cop = (o.currency || 'BRL') !== 'BRL';
+  if (!cop) { nodes.valor = 'on'; edges['moeda-valor'] = 1; }
+  if (cop) {
+    edges['moeda-kushki'] = 1; nodes.kushki = done ? 'ok' : waiting ? 'wait' : 'bad';
+    why = `Moeda ${o.currency}: a regra manda direto para a Kushki (a única com conta em pesos colombianos).`;
+    title = done ? 'Cobrado pela Kushki' : waiting ? 'Aguardando o comprador pagar…' : 'Não aprovado';
+  } else if (!big) {
+    edges['valor-cieloA'] = 1; nodes.cieloA = done ? 'ok' : waiting ? 'wait' : 'bad';
+    why = `Valor ${brl(o.amount)} não passa de ${brl(threshold * 100)}: regra manda direto para a Cielo.`;
+    title = done ? 'Cobrado pela Cielo' : waiting ? 'Aguardando o comprador pagar…' : 'Não aprovado';
+  } else {
+    edges['valor-band'] = 1; nodes.band = 'on';
+    if (triedPayu) {
+      edges['band-payu'] = 1;
+      const payuFailed = failed.some((f) => /payu/i.test(f)), payuOk = done && /payu/i.test(o.psp || '');
+      nodes.payu = payuOk ? 'ok' : payuFailed ? 'bad' : 'wait';
+      if (payuFailed) { edges['payu-cieloF'] = 1; nodes.cieloF = done ? 'ok' : o.status === 'ERROR' ? 'bad' : 'wait'; }
+      why = `Valor ${brl(o.amount)} acima de ${brl(threshold * 100)} e bandeira Visa: a regra tenta a PayU primeiro.` +
+        (payuFailed ? ' A PayU recusou, então o fluxo segue para o fallback (Cielo).' : '');
+      title = payuOk ? 'Cobrado pela PayU' : done ? 'PayU recusou → Cielo aprovou' : o.status === 'ERROR' ? 'Não aprovado' : 'Processando…';
+    } else if (waiting) {
+      nodes.band = 'wait'; why = `Valor ${brl(o.amount)} acima de ${brl(threshold * 100)}: avaliando a bandeira…`; title = 'Aguardando o comprador pagar…';
+    } else {
+      edges['valor-band'] = 1; edges['band-cieloB'] = 1; nodes.cieloB = done ? 'ok' : 'bad';
+      why = `Valor acima de ${brl(threshold * 100)}, mas a bandeira não é Visa: vai para a Cielo.`; title = done ? 'Cobrado pela Cielo' : 'Não aprovado';
+    }
+  }
+  const path = cop ? [`Moeda ${o.currency}`, done ? 'Kushki ✓' : 'Kushki'] : (big && waiting && !triedPayu) ? ['Valor alto', 'avaliando…'] : !big ? [`Valor ≤ ${brl(threshold * 100)}`, 'Cielo'] : triedPayu ? ['Valor alto', 'Visa', failed.some((f) => /payu/i.test(f)) ? 'PayU ✗' : 'PayU', done && !/payu/i.test(o.psp || '') ? 'Cielo ✓' : (done ? '✓' : '…')] : ['Valor alto', 'outra bandeira', 'Cielo'];
+  return { nodes, edges, why, title, done, waiting, fallback: failed.some((f) => /payu/i.test(f)) && done && /cielo/i.test(o.psp || ''), path };
+}
+
+function paint(o) {
+  const a = analyse(o, data.threshold);
+  if (a.nonCard) a.nodes = { start: 'on' };
+  for (const n of NODES) $('n-' + n).setAttribute('class', 'node ' + (a.nodes[n] || ''));
+  for (const e of EDGES) {
+    const el = $('e-' + e), on = a.edges[e];
+    el.setAttribute('class', 'edge' + (e === 'payu-cieloF' ? ' dash' : '') + (on ? (e === 'payu-cieloF' && a.nodes.payu === 'bad' ? ' on bad' : ' on') : ''));
+  }
+  $('s-start').textContent = brl(o.amount, o.currency);
+  const chips = a.nonCard ? `<div class="chips">${a.path.map((p) => `<span class="${p.includes('✗') ? 'x' : p.includes('⚠') ? 'w' : p.includes('✓') ? 'v' : ''}">${esc(p)}</span>`).join('')}</div>` : '';
+  $('verdict').innerHTML = `<b>${a.title}</b><div class="why">${esc(a.why)}</div>${chips}`;
+}
+
+let logSig = '';
+async function paintLog(o) {
+  let calls = [];
+  try { calls = await (await fetch('/painel/chamadas?order=' + o.id)).json(); } catch (e) { /* ignora */ }
+  const sig = JSON.stringify([o.id, o.hist, calls.map((c) => c.id)]);
+  if (sig === logSig) return; logSig = sig;
+  const tl = (o.hist || []).map((h) => `<span><em>${esc(h.t)}</em> <b>${esc(h.status)}</b>${h.descr ? ` <em>· ${esc(h.descr)}</em>` : ''}</span>`).join('');
+  const cs = calls.map((c) => `<details class="call" ${c.ok ? '' : 'open'}><summary><i class="dot ${c.ok ? 'ok' : 'bad'}"></i><span class="psp">${({ payu: 'PayU', cielo: 'Cielo', kushki: 'Kushki', payvalida: 'Payvalida', wepayments: 'WePayments' })[c.psp] || c.psp}</span>
+      <span class="meta">${esc(c.method)} ${esc(c.path)} · ${c.ms} ms · HTTP ${c.status}</span><span class="res ${c.ok ? 'ok' : 'bad'}">${esc(c.text)}</span></summary>
+      <div class="cols"><div><h4>Enviado</h4><pre>${esc(JSON.stringify(c.req, null, 2) ?? '(sem corpo)')}</pre></div><div><h4>Recebido</h4><pre>${esc(JSON.stringify(c.res, null, 2) ?? '(sem corpo)')}</pre></div></div></details>`).join('');
+  $('log').innerHTML = `<h3>Log da transação</h3><div class="tl">${tl}</div>` + (cs || '<div class="hint">Nenhuma chamada a PSP capturada para este pedido (a captura só vale para pedidos feitos depois de ligar o proxy).</div>');
+}
+
+const FLOW_PSPS = { CREDIT_CARD: ['Cielo', 'PayU', 'Kushki'], PIX: ['WePayments'], CASH: ['WePayments', 'Payvalida', 'Kushki'], TRANSFER: ['Payvalida', 'Kushki'] };
+// Pix, boleto and transfer flows are small, so they are drawn from a spec: nodes [id, x, y, label, sub, shape] and edges [from, to, label, dashed]
+const FLOW_SPEC = {
+  PIX: { n: [['s', 30, 100, 'Compra'], ['wepayments', 420, 100, 'WePayments', 'único PSP do Pix']], e: [['s', 'wepayments']] },
+  CASH: { n: [['s', 30, 100, 'Compra'], ['m', 260, 112, 'Moeda', 'é BRL ?', 'd'], ['wepayments', 700, 20, 'WePayments', 'BRL'], ['payvalida', 700, 105, 'Payvalida', 'COP · 1ª opção'], ['kushki', 700, 185, 'Kushki', 'COP · fallback']],
+    e: [['s', 'm'], ['m', 'wepayments', 'SIM'], ['m', 'payvalida', 'NÃO (COP)'], ['payvalida', 'kushki', 'se falhar', 1]] },
+  TRANSFER: { n: [['s', 30, 100, 'Compra'], ['payvalida', 420, 60, 'Payvalida', '1ª opção'], ['kushki', 420, 150, 'Kushki', 'fallback']], e: [['s', 'payvalida'], ['payvalida', 'kushki', 'se falhar', 1]] }
+};
+function drawOther(method, o) {
+  const spec = FLOW_SPEC[method]; if (!spec) return;
+  const a = o && o.method === method ? analyse(o, data.threshold) : null;
+  const tried = {};
+  for (const x of (a && o.attempts) || []) { const t = tried[x.psp]; tried[x.psp] = t === undefined ? x.ok : (t && x.ok); }
+  const cop = o && (o.currency || 'BRL') !== 'BRL';
+  const pos = Object.fromEntries(spec.n.map((n) => [n[0], n]));
+  const W = 150, H = 52;
+  const state = (id) => { if (!a) return ''; if (id === 's' || id === 'm') return 'on'; return id in tried ? (tried[id] ? (a.partial ? 'warn' : 'ok') : 'bad') : ''; };
+  const edgeOn = (f, t) => { if (!a) return false; if (f === 's') return true; if (f === 'm') return t === 'wepayments' ? !cop : cop; return t in tried; };
+  const side = (n, k) => (n[5] === 'd' ? { l: [n[1] - 70, n[2]], r: [n[1] + 70, n[2]], b: [n[1], n[2] + 40] } : { l: [n[1], n[2] + H / 2], r: [n[1] + W, n[2] + H / 2], b: [n[1] + W / 2, n[2] + H] })[k];
+  let svg = '';
+  for (const [f, t, label, dashed] of spec.e) {
+    const A = pos[f], B = pos[t];
+    const from = dashed ? side(A, 'b') : side(A, 'r'), to = dashed ? [B[1] + W / 2, B[2]] : side(B, 'l');
+    const d = dashed ? `M${from[0]} ${from[1]} V ${to[1]}` : `M${from[0]} ${from[1]} C ${from[0] + 60} ${from[1]} ${to[0] - 60} ${to[1]} ${to[0]} ${to[1]}`;
+    const on = edgeOn(f, t), bad = dashed && a && tried[f] === false && on;
+    svg += `<path class="edge${dashed ? ' dash' : ''}${on ? ' on' : ''}${bad ? ' bad' : ''}" d="${d}"/>`;
+    if (label) svg += `<text class="tag ${on ? 's' : 'n'}" x="${dashed ? from[0] + 12 : (from[0] + to[0]) / 2 - 20}" y="${dashed ? (from[1] + to[1]) / 2 + 4 : (from[1] + to[1]) / 2 - 8}">${label}</text>`;
+  }
+  for (const n of spec.n) {
+    const st = state(n[0]);
+    if (n[5] === 'd') svg += `<g class="node ${st}"><polygon points="${n[1]},${n[2] - 40} ${n[1] + 70},${n[2]} ${n[1]},${n[2] + 40} ${n[1] - 70},${n[2]}"/><text x="${n[1]}" y="${n[2] - 4}">${n[3]}</text><text class="sub" x="${n[1]}" y="${n[2] + 14}">${n[4]}</text></g>`;
+    else svg += `<g class="node ${st}"><rect x="${n[1]}" y="${n[2]}" width="${W}" height="${H}" rx="12"/><text x="${n[1] + W / 2}" y="${n[2] + 24}">${n[3]}</text><text class="sub" x="${n[1] + W / 2}" y="${n[2] + 42}">${n[0] === 's' && o && o.method === method ? brl(o.amount, o.currency) : (n[4] || '')}</text></g>`;
+  }
+  $('svg2').innerHTML = svg;
+}
+
+function render() {
+  const { orders, threshold } = data;
+  $('valor-l2').textContent = brl(threshold * 100) + ' ?';
+  const an = orders.map((o) => analyse(o, threshold));
+  $('k-total').textContent = an.filter((a) => !a.expired).length;
+  $('k-ok').textContent = an.filter((a) => a.done).length;
+  $('k-fb').textContent = an.filter((a) => a.fallback).length;
+  const by = {}; orders.filter((o) => o.status === 'APPROVED' && o.psp).forEach((o) => (by[o.psp] = (by[o.psp] || 0) + 1));
+  $('k-psp').textContent = Object.entries(by).sort((x, y) => y[1] - x[1])[0]?.[0] ?? '–';
+  const feed = $('feed'); feed.innerHTML = '';
+  orders.forEach((o, i) => {
+    const a = an[i], el = document.createElement('div');
+    el.className = 'ord' + (o.id === (selected ?? orders[0]?.id) ? ' sel' : '') + (!seen.has(o.id) ? ' new' : '') + (a.expired ? ' exp' : '');
+    seen.add(o.id);
+    el.innerHTML = `<div class="top"><b>${brl(o.amount, o.currency)}</b><span class="chip ${a.expired ? 'EXPIRED' : o.status}">${a.expired ? 'EXPIRADO' : ({WAITING_PSP_PAYMENT:'AGUARDA PAGAMENTO',APPROVED:'APROVADO',ERROR:'ERRO',DENIED:'NEGADO',WAITING_CUSTOMER_PAYMENT:'AGUARDANDO'})[o.status] || o.status}</span></div>
+      <div class="path">${a.path.map((p) => p.includes('✗') ? `<span class="x">${p}</span>` : p.includes('⚠') ? `<span style="color:var(--warn)">${p}</span>` : p.includes('✓') ? `<span class="v">${p}</span>` : p).join(' → ')}</div>`;
+    el.onclick = () => { selected = o.id; last = ''; render(); };
+    feed.appendChild(el);
+  });
+  const cur = orders.find((o) => o.id === (selected ?? orders[0]?.id)) || orders[0];
+  const shown = pinned || cur?.method || 'CREDIT_CARD';
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.m === shown));
+  const fname = (data.flows || {})[shown];
+  $('flowname').innerHTML = fname ? `Fluxo ativo: <b>${esc(fname)}</b>${(FLOW_PSPS[shown] || []).map((p) => `<span>${p}</span>`).join('')}` : 'Nenhum fluxo ativo para este meio';
+  $('flow-card').style.display = shown === 'CREDIT_CARD' ? '' : 'none';
+  $('flow-other').style.display = shown === 'CREDIT_CARD' ? 'none' : '';
+  if (shown !== 'CREDIT_CARD') drawOther(shown, cur);
+  if (cur) { const sig = JSON.stringify([cur.id, cur.status, cur.psp, cur.hist?.length, analyse(cur, threshold).expired, pinned, (cur.attempts || []).length]); if (sig !== last) { last = sig; paint(cur); } paintLog(cur); }
+}
+
+async function tick() {
+  try { const r = await fetch('/painel/dados'); data = await r.json(); if (selected && !data.orders.find((o) => o.id === selected)) selected = null;
+    // um pedido novo assume a tela (modo apresentacao)
+    const newest = data.orders[0]; if (newest && !seen.has(newest.id) && seen.size) { selected = null; pinned = null; }
+    render(); } catch (e) { /* servidor reiniciando */ }
+  setTimeout(tick, 1000);
+}
+document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => { pinned = pinned === b.dataset.m ? null : b.dataset.m; last = ''; render(); }));
+document.querySelectorAll('.go button[data-k]').forEach((b) => b.addEventListener('click', async () => {
+  b.disabled = true;
+  try { await fetch('/painel/disparar/' + b.dataset.k, { method: 'POST' }); } catch (e) { /* o painel mostra o resultado */ }
+  b.disabled = false;
+}));
+tick();
+</script>
+</body>
+</html>
