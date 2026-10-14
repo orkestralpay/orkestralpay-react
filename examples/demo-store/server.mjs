@@ -243,10 +243,26 @@ async function panelData(config) {
 	const flowRows = await psql('management-service-db', 'management_service_db',
 		`select coalesce(json_object_agg(pm.name, f.name), '{}') from payment_flow f join payment_method pm on pm.id = f.payment_method_type_id
 		 where f.active and f.merchant_id = '${config.merchantId}'`);
+	// active flow of each payment method as a rule tree (decisions, PSPs in priority order, equalizer splits), so the panel draws what the router really runs
+	const trees = await psql('management-service-db', 'management_service_db',
+		`with recursive t as (
+		   select f.id as flow_id, f.rule_id as id from payment_flow f where f.active and f.merchant_id = '${config.merchantId}' and f.rule_id is not null
+		   union
+		   select t.flow_id, x.id from t join rules r on r.id = t.id
+		   cross join lateral (select r.next_rule_if_true_id union select r.next_rule_if_false_id union select q.next_rule_id from equalizer q where q.rule_id = r.id) x(id)
+		   where x.id is not null)
+		 select coalesce(json_object_agg(s.method, s.tree), '{}') from (
+		   select pm.name as method, json_build_object('name', f.name, 'root', f.rule_id, 'nodes', json_object_agg(r.id, json_build_object(
+		     't', rt.rule, 'op', ot.operation, 'v', r.condition_value, 'y', r.next_rule_if_true_id, 'n', r.next_rule_if_false_id,
+		     'psps', (select json_agg(p.name order by e.priority) from pay_process_execution e join psp p on p.id = e.psp_id where e.rule_id = r.id),
+		     'eq', (select json_agg(json_build_object('v', q.value, 'to', q.next_rule_id)) from equalizer q where q.rule_id = r.id)))) as tree
+		   from t join payment_flow f on f.id = t.flow_id join payment_method pm on pm.id = f.payment_method_type_id
+		   join rules r on r.id = t.id join rule_type rt using (rule_type_id) left join operator_type ot using (operator_type_id)
+		   group by pm.name, f.name, f.rule_id) s`);
 	const list = JSON.parse(orders);
 	// PSP attempts per order (from the recording proxy; bodies without the order id are attached by time window)
 	for (const o of list) o.attempts = callsOf(o.id, list).map((c) => ({ psp: c.psp, ok: c.ok, text: c.text, path: c.path }));
-	return { threshold: Number(JSON.parse(rule || '["0"]')[0]), flows: JSON.parse(flowRows || '{}'), orders: list };
+	return { threshold: Number(JSON.parse(rule || '["0"]')[0]), flows: JSON.parse(flowRows || '{}'), trees: JSON.parse(trees || '{}'), orders: list };
 }
 
 // Local demo only: recording forward proxy for the PSP calls (integrator -> PSP), so the panel can show what was sent and received.

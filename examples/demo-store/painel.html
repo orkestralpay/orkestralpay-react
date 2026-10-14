@@ -94,32 +94,8 @@ pre{margin:0;max-width:100%;background:#0a110d;border:1px solid var(--line);bord
 
   <section class="card">
     <h2>Caminho do pedido pelo fluxo</h2>
-    <div class="flowhead"><div class="tabs" id="tabs"><button data-m="CREDIT_CARD">Cartão de Crédito</button><button data-m="PIX">Pix</button><button data-m="CASH">Dinheiro (boleto)</button><button data-m="TRANSFER">Transferência bancária</button></div><div class="flowname" id="flowname"></div></div>
-    <div id="flow-other" style="display:none"><svg viewBox="0 0 1100 250" id="svg2"></svg></div>
-    <div id="flow-card"><svg viewBox="0 0 1100 400" id="svg">
-      <path id="e-start-moeda" class="edge" d="M140 187 H180"/>
-      <path id="e-moeda-valor" class="edge" d="M320 187 C 365 187 365 120 410 120"/>
-      <path id="e-moeda-kushki" class="edge" d="M250 227 C 250 360 560 356 880 356"/>
-      <path id="e-valor-band" class="edge" d="M550 120 C 590 120 590 80 630 80"/>
-      <path id="e-valor-cieloA" class="edge" d="M480 150 C 480 270 700 288 880 288"/>
-      <path id="e-band-payu" class="edge" d="M770 80 C 825 80 825 44 880 44"/>
-      <path id="e-band-cieloB" class="edge" d="M700 110 C 700 190 790 197 880 197"/>
-      <path id="e-payu-cieloF" class="edge dash" d="M950 70 V 128"/>
-      <text class="tag s" x="352" y="160">SIM</text><text class="tag n" x="256" y="286">NÃO (COP)</text>
-      <text class="tag s" x="592" y="108">SIM</text><text class="tag n" x="470" y="218">NÃO</text>
-      <text class="tag s" x="822" y="58">SIM</text><text class="tag n" x="736" y="178">NÃO</text>
-      <text class="tag n" x="962" y="104" id="t-fb">se recusar</text>
-
-      <g class="node" id="n-start"><rect x="20" y="160" width="120" height="54" rx="12"/><text x="80" y="182">Compra</text><text class="sub" x="80" y="200" id="s-start">aguardando…</text></g>
-      <g class="node" id="n-moeda"><polygon points="250,147 320,187 250,227 180,187"/><text x="250" y="183">Moeda</text><text class="sub" x="250" y="201">é BRL ?</text></g>
-      <g class="node" id="n-valor"><polygon points="480,90 550,120 480,150 410,120"/><text x="480" y="117" id="valor-l1">Valor ></text><text class="sub" x="480" y="134" id="valor-l2">R$ 0,00 ?</text></g>
-      <g class="node" id="n-band"><polygon points="700,50 770,80 700,110 630,80"/><text x="700" y="77">Bandeira</text><text class="sub" x="700" y="94">é Visa ?</text></g>
-      <g class="node" id="n-payu"><rect x="880" y="18" width="140" height="52" rx="12"/><text x="950" y="40">PayU</text><text class="sub" x="950" y="58" id="s-payu">1ª opção</text></g>
-      <g class="node" id="n-cieloF"><rect x="880" y="128" width="140" height="52" rx="12"/><text x="950" y="150">Cielo</text><text class="sub" x="950" y="168">fallback</text></g>
-      <g class="node" id="n-cieloB"><rect x="880" y="197" width="140" height="52" rx="12"/><text x="950" y="219">Cielo</text><text class="sub" x="950" y="237">outra bandeira</text></g>
-      <g class="node" id="n-cieloA"><rect x="880" y="262" width="140" height="52" rx="12"/><text x="950" y="284">Cielo</text><text class="sub" x="950" y="302">compra pequena</text></g>
-      <g class="node" id="n-kushki"><rect x="880" y="330" width="140" height="52" rx="12"/><text x="950" y="352">Kushki</text><text class="sub" x="950" y="370">pesos colombianos</text></g>
-    </svg></div>
+    <div class="flowhead"><div class="tabs" id="tabs"></div><div class="flowname" id="flowname"></div></div>
+    <div id="flow"><svg viewBox="0 0 1100 400" id="svg"></svg></div>
     <div class="verdict" id="verdict"><b>Aguardando a primeira compra…</b><div class="why">Faça uma compra na loja e acompanhe aqui.</div></div>
     <div class="log" id="log"></div>
   </section>
@@ -180,88 +156,198 @@ pre{margin:0;max-width:100%;background:#0a110d;border:1px solid var(--line);bord
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 const brl = (c, cur = 'BRL') => (c / 100).toLocaleString(cur === 'COP' ? 'es-CO' : 'pt-BR', { style: 'currency', currency: cur, currencyDisplay: cur === 'COP' ? 'code' : 'symbol', maximumFractionDigits: cur === 'COP' ? 0 : 2 });
-const NODES = ['start','moeda','valor','band','payu','cieloF','cieloB','cieloA','kushki'];
-const EDGES = ['start-moeda','moeda-valor','moeda-kushki','valor-band','valor-cieloA','band-payu','band-cieloB','payu-cieloF'];
-let selected = null, pinned = null, seen = new Set(), last = '', data = { orders: [], threshold: 0, flows: {} };
+let selected = null, pinned = null, seen = new Set(), last = '', data = { orders: [], flows: {}, trees: {} };
 
-// Reconstroi o caminho de um pedido a partir do historico de status e do PSP final.
-function analyse(o, threshold) {
-  const hist = o.hist || [];
-  const failed = hist.filter((h) => h.status === 'ERROR' && h.descr).map((h) => (h.descr.match(/^(PayU|Cielo)/i) || [])[1]).filter(Boolean);
-  const done = o.status === 'APPROVED', waiting = o.status === 'WAITING_CUSTOMER_PAYMENT';
-  // pedido que passou do prazo sem nenhuma tentativa de cobranca: nao e "aguardando", expirou
-  if (waiting && !failed.length && o.expires_at && Date.parse(o.expires_at) < Date.now()) {
-    return { nodes: { start: 'on' }, edges: {}, why: 'O comprador não pagou dentro do prazo do link (10 minutos). Nenhuma chamada foi feita a PSP.', title: 'Pedido expirou sem pagamento', done: false, waiting: false, expired: true, fallback: false, path: ['Expirado'] };
+const PSP_NAME = { payu: 'PayU', cielo: 'Cielo', kushki: 'Kushki', payvalida: 'Payvalida', wepayments: 'WePayments' };
+const LAB = { CREDIT_CARD: 'Cartão de Crédito', DEBIT_CARD: 'Cartão de Débito', PIX: 'Pix', CASH: 'Dinheiro (boleto)', TRANSFER: 'Transferência bancária', WALLETS: 'Carteira' };
+const ORDER = ['CREDIT_CARD', 'DEBIT_CARD', 'PIX', 'CASH', 'TRANSFER', 'WALLETS'];
+const OP = { GREATER_THAN: '>', LESS_THAN: '<', EQUAL: '=', NOT_EQUAL: '≠', GREATER_OR_EQUAL: '≥', LESS_OR_EQUAL: '≤' };
+const ERR_PREFIX = /^Error while sending transaction request to Payment Service Provider Exception Message: /;
+const key = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
+const name = (k) => PSP_NAME[k] || k || 'o PSP';
+const cap = (s) => String(s).charAt(0) + String(s).slice(1).toLowerCase();
+const vals = (r) => { try { return [].concat(JSON.parse(r.v)); } catch { return r.v ? [r.v] : []; } };
+const methodOf = (o) => o.method || 'CREDIT_CARD';
+
+// ---- the flow, as stored in the database (rules + pay_process_execution + equalizer) ----
+// a rule with PSPs is an execution (PSPs tried in priority order); otherwise it branches yes/no, or by percentage (equalizer)
+function kids(tree, id) {
+  const r = tree.nodes[id];
+  if (!r || (r.psps && r.psps.length)) return [];
+  const ks = r.eq && r.eq.length ? r.eq.map((e) => ({ to: e.to, label: `${e.v}%` }))
+    : [r.y && { to: r.y, label: 'SIM', yes: true }, r.n && { to: r.n, label: 'NÃO', yes: false }].filter(Boolean);
+  return ks.filter((k) => tree.nodes[k.to]);
+}
+function pspsUnder(tree, id, acc = new Set(), seenIds = new Set()) {
+  if (seenIds.has(id) || !tree.nodes[id]) return acc;
+  seenIds.add(id);
+  (tree.nodes[id].psps || []).forEach((p) => acc.add(key(p)));
+  kids(tree, id).forEach((k) => pspsUnder(tree, k.to, acc, seenIds));
+  return acc;
+}
+function ruleLabel(r) {
+  const v = vals(r), neg = r.op === 'NOT_EQUAL', is = neg ? 'não é' : 'é';
+  switch (r.t) {
+    case 'CURRENCY': return ['Moeda', `${is} ${v.join('/')}?`];
+    case 'VALUE': return ['Valor', `${OP[r.op] || '='} ${brl(Number(v[0]) * 100)}?`];
+    case 'FLAG': return ['Bandeira', `${is} ${v.map(cap).join('/')}?`];
+    case 'COUNTRY': return ['País', `${is} ${v.join('/')}?`];
+    case 'INSTALLMENT': return ['Parcelas', `${OP[r.op] || '='} ${v[0]}?`];
+    case 'EQUALIZER': return ['Divisão', 'por percentual'];
+    default: return [cap(r.t), v.join('/')];
   }
-  if (o.method && o.method !== 'CREDIT_CARD') {
-    const name = { payu: 'PayU', cielo: 'Cielo', kushki: 'Kushki', payvalida: 'Payvalida', wepayments: 'WePayments' };
-    const lab = ({ PIX: 'PIX', CASH: 'Boleto', TRANSFER: 'PSE / transferência', WALLETS: 'Carteira' })[o.method] || o.method;
-    // varias chamadas ao mesmo PSP (ex.: lista de redes + ordem) contam como uma tentativa dele
-    const at = [];
-    for (const x of o.attempts || []) { const prev = at.find((y) => y.psp === x.psp); if (prev) { prev.ok = prev.ok && x.ok; if (!x.ok) prev.text = x.text; } else at.push({ ...x }); }
-    // PSP que falhou ANTES de ser chamado (validacao nossa): so aparece no erro registrado do historico, entao entra como tentativa falha
-    for (const h of (o.hist || []).filter((h) => h.status === 'ERROR' && h.descr)) {
-      const m = h.descr.match(/payvalida|kushki|wepayments|payu|cielo/i);
-      const k = m && m[0].toLowerCase();
-      if (k && !at.some((y) => y.psp === k)) at.unshift({ psp: k, ok: false, text: 'não chegou a ser chamado · ' + h.descr.replace(/^Error while sending transaction request to Payment Service Provider Exception Message: /, '') });
+}
+// rules the order data answers by itself; the others (flag, country, installments, split) are deduced from the PSP that was called
+function decide(r, o) {
+  const v = vals(r);
+  if (r.t === 'CURRENCY') { const has = v.includes(o.currency || 'BRL'); return r.op === 'NOT_EQUAL' ? !has : has; }
+  if (r.t === 'VALUE') { const a = o.amount / 100, b = Number(v[0]); return ({ GREATER_THAN: a > b, LESS_THAN: a < b, EQUAL: a === b, NOT_EQUAL: a !== b, GREATER_OR_EQUAL: a >= b, LESS_OR_EQUAL: a <= b })[r.op] ?? null; }
+  return null;
+}
+function route(tree, o, at) {
+  const steps = [], tried = new Set(at.map((x) => x.psp));
+  let id = tree.root;
+  for (let guard = 0; id && tree.nodes[id] && guard < 50; guard++) {
+    const ks = kids(tree, id);
+    if (!ks.length) return { steps, exec: id };
+    const d = decide(tree.nodes[id], o);
+    let k = d !== null && ks.length === 2 ? ks.find((x) => x.yes === d) : null, deduced = false;
+    if (!k && tried.size) { k = ks.find((x) => [...pspsUnder(tree, x.to)].some((p) => tried.has(p))); deduced = !!k; }
+    steps.push({ id, k, deduced });
+    if (!k) break;  // not decided yet (e.g. the card flag, before the buyer pays)
+    id = k.to;
+  }
+  return { steps, exec: null };
+}
+
+// What each PSP did for an order: the recording proxy calls, plus PSPs that failed our own validation before being called (only in the status history)
+function attemptsOf(o) {
+  const at = [];
+  for (const x of o.attempts || []) { const p = at.find((y) => y.psp === x.psp); if (p) { p.ok = p.ok && x.ok; if (!x.ok) p.text = x.text; } else at.push({ ...x }); }
+  for (const h of (o.hist || []).filter((h) => h.status === 'ERROR' && h.descr)) {
+    const m = h.descr.match(/payvalida|kushki|wepayments|payu|cielo/i), k = m && m[0].toLowerCase();
+    if (!k) continue;
+    const p = at.find((y) => y.psp === k);
+    if (p) p.ok = false; else at.unshift({ psp: k, ok: false, text: 'não chegou a ser chamado · ' + h.descr.replace(ERR_PREFIX, '') });
+  }
+  return at;
+}
+
+function analyse(o) {
+  const method = methodOf(o), tree = (data.trees || {})[method], nonCard = method !== 'CREDIT_CARD' && method !== 'DEBIT_CARD';
+  const at = attemptsOf(o);
+  // order that passed the link deadline without any PSP call: not "waiting", expired
+  if (o.status === 'WAITING_CUSTOMER_PAYMENT' && !at.length && o.expires_at && Date.parse(o.expires_at) < Date.now()) {
+    return { method, expired: true, steps: [], states: {}, title: 'Pedido expirou sem pagamento', why: 'O comprador não pagou dentro do prazo do link (10 minutos). Nenhuma chamada foi feita a PSP.', path: ['Expirado'] };
+  }
+  const created = o.status === 'APPROVED' || o.status === 'WAITING_PSP_PAYMENT' || (nonCard && o.status === 'WAITING_CUSTOMER_PAYMENT');
+  const charged = created ? key(o.psp) || [...at].reverse().find((x) => x.ok)?.psp : null;
+  if (charged && !at.some((x) => x.psp === charged)) at.push({ psp: charged, ok: true, text: 'cobrança registrada' });
+  const partial = o.status === 'ERROR' && at.some((x) => x.ok);  // the HTTP call worked, but the charge was not completed
+  const { steps, exec } = tree ? route(tree, o, at) : { steps: [], exec: null };
+  const states = {};
+  if (exec) tree.nodes[exec].psps.map(key).forEach((p, i) => {
+    const a = at.find((x) => x.psp === p);
+    states[p] = p === charged ? (o.status === 'APPROVED' || nonCard ? 'ok' : 'wait')
+      : a ? (a.ok ? (partial ? 'warn' : 'wait') : 'bad')
+      : i === 0 && !at.length && o.status === 'WAITING_CUSTOMER_PAYMENT' ? 'wait' : '';
+  });
+  const failed = at.filter((x) => !x.ok && x.psp !== charged);
+  const fallback = created && failed.length > 0;
+  const lab = LAB[method] || method;
+  const title = !tree ? `Nenhum fluxo ativo para ${lab}`
+    : o.status === 'APPROVED' ? (fallback ? `${failed.map((x) => name(x.psp)).join(', ')} recusou → ${name(charged)} aprovou` : `Cobrado pela ${name(charged)}`)
+    : created ? (nonCard ? `${lab}: cobrança criada pela ${name(charged)}` : 'Aguardando a confirmação do PSP…')
+    : o.status === 'ERROR' ? (nonCard ? `${lab}: nenhum PSP criou a cobrança` : 'Não aprovado')
+    : o.status === 'DENIED' ? 'Não aprovado'
+    : o.status === 'WAITING_CUSTOMER_PAYMENT' ? 'Aguardando o comprador pagar…' : 'Processando…';
+  const rules = steps.map(({ id, k, deduced }) => { const [t, s] = ruleLabel(tree.nodes[id]); return `${t} ${s.replace(/\?$/, '')}: ${k ? k.label.toLowerCase() + (deduced ? ' (deduzido pelo PSP chamado)' : '') : 'aguardando…'}`; });
+  const lastErr = nonCard ? (o.hist || []).filter((h) => h.status === 'ERROR' && h.descr).slice(-1).map((h) => `Erro registrado: ${h.descr.replace(ERR_PREFIX, '')}`) : [];
+  const why = [...rules, ...at.map((x) => `${name(x.psp)}: ${x.text}${x.ok && partial ? ' (a chamada deu certo, mas a cobrança não foi concluída)' : ''}`), ...lastErr].join(' · ') || 'Nenhuma chamada foi feita ao PSP.';
+  const short = ({ id, k }) => {
+    if (!k) return 'avaliando…';
+    const r = tree.nodes[id], v = vals(r);
+    if (r.t === 'CURRENCY') return `Moeda ${o.currency || 'BRL'}`;
+    if (r.t === 'VALUE') { const op = OP[r.op] || '='; return `Valor ${k.yes ? op : ({ '>': '≤', '<': '≥', '=': '≠', '≠': '=', '≥': '<', '≤': '>' })[op]} ${brl(Number(v[0]) * 100)}`; }
+    if (r.t === 'FLAG') return k.yes ? v.map(cap).join('/') : 'outra bandeira';
+    if (r.t === 'COUNTRY') return k.yes ? v.join('/') : 'outro país';
+    return `${ruleLabel(r)[0]} ${k.label}`;
+  };
+  const mark = { ok: ' ✓', bad: ' ✗', warn: ' ⚠' };
+  const path = [...(nonCard ? [`${lab} · ${o.currency}`] : []), ...steps.map(short),
+    ...(exec ? tree.nodes[exec].psps.map(key).filter((p) => states[p]).map((p) => name(p) + (mark[states[p]] || '')) : [])];
+  return { method, steps, exec, states, title, why, path, done: o.status === 'APPROVED', fallback };
+}
+
+// ---- drawing: decisions in columns, executions aligned in the last column, each PSP box below the previous (fallback) ----
+const W = 150, H = 52, GAP = 22, DX = 230;
+function drawFlow(method, o) {
+  const svg = $('svg'), tree = (data.trees || {})[method];
+  if (!tree || !tree.nodes[tree.root]) { svg.setAttribute('viewBox', '0 0 1100 80'); svg.innerHTML = '<text class="tag n" x="20" y="44">Nenhum fluxo ativo para este meio de pagamento.</text>'; return; }
+  const a = o && methodOf(o) === method && !analyse(o).expired ? analyse(o) : null;
+  const depth = {}, hOf = {}, pos = {};
+  let maxD = -1;
+  (function walk(id, d) { if (id in depth) return; depth[id] = d; const ks = kids(tree, id); if (ks.length) maxD = Math.max(maxD, d); ks.forEach((k) => walk(k.to, d + 1)); })(tree.root, 0);
+  const height = (id) => {
+    if (id in hOf) return 0;
+    hOf[id] = 0;
+    const ks = kids(tree, id);
+    return (hOf[id] = ks.length ? Math.max(80, ks.reduce((s, k) => s + height(k.to), 0) + GAP * (ks.length - 1)) : Math.max(1, tree.nodes[id].psps.length) * (H + GAP) - GAP);
+  };
+  height(tree.root);
+  // PSPs always in the right column, so small flows keep the same scale as the card flow
+  const execX = Math.max(920, 260 + (maxD + 1) * DX - 40);
+  const anchor = (id) => (pos[id].exec ? pos[id].y + H / 2 : pos[id].y);
+  const place = (id, top) => {
+    if (pos[id]) return;
+    const ks = kids(tree, id);
+    if (!ks.length) { pos[id] = { x: execX, y: top, exec: true }; return; }
+    let t = top;
+    ks.forEach((k) => { place(k.to, t); t += hOf[k.to] + GAP; });
+    pos[id] = { x: 260 + depth[id] * DX, y: (anchor(ks[0].to) + anchor(ks[ks.length - 1].to)) / 2 };
+  };
+  place(tree.root, 30);
+  const stepOf = Object.fromEntries((a ? a.steps : []).map((s) => [s.id, s]));
+  let edges = '', tags = '', nodes = '';
+  const edge = (d, on, extra = '') => `<path class="edge${extra}${on ? ' on' : ''}" d="${d}"/>`;
+  const curve = (x1, y1, x2, y2) => `M${x1} ${y1} C ${x1 + 50} ${y1} ${x2 - 60} ${y2} ${x2} ${y2}`;
+  // start
+  const ry = anchor(tree.root), rootIn = pos[tree.root].exec ? execX : pos[tree.root].x - 70;
+  edges += edge(curve(140, ry, rootIn, ry), !!a);
+  nodes += `<g class="node ${a ? 'on' : ''}"><rect x="20" y="${ry - 27}" width="120" height="54" rx="12"/><text x="80" y="${ry - 5}">Compra</text><text class="sub" x="80" y="${ry + 13}">${a ? brl(o.amount, o.currency) : 'aguardando…'}</text></g>`;
+  for (const id of Object.keys(pos)) {
+    const p = pos[id], r = tree.nodes[id];
+    if (p.exec) {
+      const ps = r.psps.map(key);
+      ps.forEach((k, i) => {
+        const y = p.y + i * (H + GAP), st = a && a.exec === id ? a.states[k] || '' : '';
+        nodes += `<g class="node ${st}"><rect x="${p.x}" y="${y}" width="${W}" height="${H}" rx="12"/><text x="${p.x + W / 2}" y="${y + 22}">${esc(name(k))}</text><text class="sub" x="${p.x + W / 2}" y="${y + 40}">${ps.length > 1 ? (i ? `${i + 1}ª opção` : '1ª opção') : ''}</text></g>`;
+        if (i) {
+          const on = !!st, bad = on && a.states[ps[i - 1]] === 'bad';
+          edges += edge(`M${p.x + W / 2} ${y - GAP} V ${y}`, on, ' dash' + (bad ? ' bad' : ''));
+          tags += `<text class="tag ${on ? 's' : 'n'}" x="${p.x + W / 2 + 10}" y="${y - GAP / 2 + 4}" style="text-anchor:start">se falhar</text>`;
+        }
+      });
+      continue;
     }
-    const created = ['WAITING_PSP_PAYMENT', 'WAITING_CUSTOMER_PAYMENT', 'APPROVED'].includes(o.status);
-    const partial = o.status === 'ERROR';  // chamada HTTP ok, mas a cobranca nao foi concluida
-    const last = at[at.length - 1];
-    return { nodes: { start: 'on' }, edges: {}, nonCard: true, done: o.status === 'APPROVED', waiting: false, expired: false, fallback: at.length > 1 && created,
-      title: created ? `${lab}: cobrança criada` : o.status === 'ERROR' ? `${lab}: nenhum PSP criou a cobrança` : 'Processando…',
-      why: (at.length ? at.map((x) => `${name[x.psp] || x.psp}: ${x.text}${x.ok && partial ? ' (a chamada deu certo, mas a cobrança não foi concluída)' : ''}`).join(' · ') : 'Nenhuma chamada foi feita ao PSP.') +
-        ((o.hist || []).filter((h) => h.status === 'ERROR' && h.descr).slice(-1).map((h) => ` · Erro registrado: ${h.descr.replace(/^Error while sending transaction request to Payment Service Provider Exception Message: /, '')}`)[0] || ''),
-      partial,
-      path: [`${lab} · ${o.currency}`, ...at.map((x) => `${name[x.psp] || x.psp} ${x.ok ? (partial ? '⚠' : '✓') : '✗'}`)] };
+    const s = stepOf[id], [t, sub] = ruleLabel(r);
+    nodes += `<g class="node ${s ? (s.k ? 'on' : 'wait') : ''}"><polygon points="${p.x},${p.y - 40} ${p.x + 70},${p.y} ${p.x},${p.y + 40} ${p.x - 70},${p.y}"/><text x="${p.x}" y="${p.y - 4}">${esc(t)}</text><text class="sub" x="${p.x}" y="${p.y + 14}">${esc(sub)}</text></g>`;
+    kids(tree, id).forEach((k, i) => {
+      const q = pos[k.to], tx = q.exec ? q.x : q.x - 70, ty = anchor(k.to), on = !!(s && s.k && s.k.to === k.to);
+      // first branch (SIM) leaves from the right corner, the second (NÃO) from the bottom corner, like the editor
+      const fromBottom = i === 1 && k.yes === false;
+      edges += edge(fromBottom ? `M${p.x} ${p.y + 40} C ${p.x} ${ty} ${p.x} ${ty} ${tx} ${ty}` : curve(p.x + 70, p.y, tx, ty), on);
+      tags += `<text class="tag ${on ? 's' : 'n'}" x="${fromBottom ? p.x + 8 : p.x + 78}" y="${fromBottom ? p.y + 62 : p.y - 8}" style="text-anchor:start">${esc(k.label)}</text>`;
+    });
   }
-  const big = o.amount / 100 > threshold && (o.currency || 'BRL') === 'BRL';
-  const triedPayu = failed.some((f) => /payu/i.test(f)) || /payu/i.test(o.psp || '');
-  const nodes = { start: 'on' }, edges = {};
-  nodes.moeda = 'on'; edges['start-moeda'] = 1;
-  let why = '', title = '';
-  const cop = (o.currency || 'BRL') !== 'BRL';
-  if (!cop) { nodes.valor = 'on'; edges['moeda-valor'] = 1; }
-  if (cop) {
-    edges['moeda-kushki'] = 1; nodes.kushki = done ? 'ok' : waiting ? 'wait' : 'bad';
-    why = `Moeda ${o.currency}: a regra manda direto para a Kushki (a única com conta em pesos colombianos).`;
-    title = done ? 'Cobrado pela Kushki' : waiting ? 'Aguardando o comprador pagar…' : 'Não aprovado';
-  } else if (!big) {
-    edges['valor-cieloA'] = 1; nodes.cieloA = done ? 'ok' : waiting ? 'wait' : 'bad';
-    why = `Valor ${brl(o.amount)} não passa de ${brl(threshold * 100)}: regra manda direto para a Cielo.`;
-    title = done ? 'Cobrado pela Cielo' : waiting ? 'Aguardando o comprador pagar…' : 'Não aprovado';
-  } else {
-    edges['valor-band'] = 1; nodes.band = 'on';
-    if (triedPayu) {
-      edges['band-payu'] = 1;
-      const payuFailed = failed.some((f) => /payu/i.test(f)), payuOk = done && /payu/i.test(o.psp || '');
-      nodes.payu = payuOk ? 'ok' : payuFailed ? 'bad' : 'wait';
-      if (payuFailed) { edges['payu-cieloF'] = 1; nodes.cieloF = done ? 'ok' : o.status === 'ERROR' ? 'bad' : 'wait'; }
-      why = `Valor ${brl(o.amount)} acima de ${brl(threshold * 100)} e bandeira Visa: a regra tenta a PayU primeiro.` +
-        (payuFailed ? ' A PayU recusou, então o fluxo segue para o fallback (Cielo).' : '');
-      title = payuOk ? 'Cobrado pela PayU' : done ? 'PayU recusou → Cielo aprovou' : o.status === 'ERROR' ? 'Não aprovado' : 'Processando…';
-    } else if (waiting) {
-      nodes.band = 'wait'; why = `Valor ${brl(o.amount)} acima de ${brl(threshold * 100)}: avaliando a bandeira…`; title = 'Aguardando o comprador pagar…';
-    } else {
-      edges['valor-band'] = 1; edges['band-cieloB'] = 1; nodes.cieloB = done ? 'ok' : 'bad';
-      why = `Valor acima de ${brl(threshold * 100)}, mas a bandeira não é Visa: vai para a Cielo.`; title = done ? 'Cobrado pela Cielo' : 'Não aprovado';
-    }
-  }
-  const path = cop ? [`Moeda ${o.currency}`, done ? 'Kushki ✓' : 'Kushki'] : (big && waiting && !triedPayu) ? ['Valor alto', 'avaliando…'] : !big ? [`Valor ≤ ${brl(threshold * 100)}`, 'Cielo'] : triedPayu ? ['Valor alto', 'Visa', failed.some((f) => /payu/i.test(f)) ? 'PayU ✗' : 'PayU', done && !/payu/i.test(o.psp || '') ? 'Cielo ✓' : (done ? '✓' : '…')] : ['Valor alto', 'outra bandeira', 'Cielo'];
-  return { nodes, edges, why, title, done, waiting, fallback: failed.some((f) => /payu/i.test(f)) && done && /cielo/i.test(o.psp || ''), path };
+  svg.setAttribute('viewBox', `0 0 ${execX + W + 30} ${hOf[tree.root] + 60}`);
+  svg.innerHTML = edges + tags + nodes;
 }
 
 function paint(o) {
-  const a = analyse(o, data.threshold);
-  if (a.nonCard) a.nodes = { start: 'on' };
-  for (const n of NODES) $('n-' + n).setAttribute('class', 'node ' + (a.nodes[n] || ''));
-  for (const e of EDGES) {
-    const el = $('e-' + e), on = a.edges[e];
-    el.setAttribute('class', 'edge' + (e === 'payu-cieloF' ? ' dash' : '') + (on ? (e === 'payu-cieloF' && a.nodes.payu === 'bad' ? ' on bad' : ' on') : ''));
-  }
-  $('s-start').textContent = brl(o.amount, o.currency);
-  const chips = a.nonCard ? `<div class="chips">${a.path.map((p) => `<span class="${p.includes('✗') ? 'x' : p.includes('⚠') ? 'w' : p.includes('✓') ? 'v' : ''}">${esc(p)}</span>`).join('')}</div>` : '';
-  $('verdict').innerHTML = `<b>${a.title}</b><div class="why">${esc(a.why)}</div>${chips}`;
+  const a = analyse(o);
+  const chips = `<div class="chips">${a.path.map((p) => `<span class="${p.includes('✗') ? 'x' : p.includes('⚠') ? 'w' : p.includes('✓') ? 'v' : ''}">${esc(p)}</span>`).join('')}</div>`;
+  $('verdict').innerHTML = `<b>${esc(a.title)}</b><div class="why">${esc(a.why)}</div>${chips}`;
 }
 
 let logSig = '';
@@ -271,52 +357,23 @@ async function paintLog(o) {
   const sig = JSON.stringify([o.id, o.hist, calls.map((c) => c.id)]);
   if (sig === logSig) return; logSig = sig;
   const tl = (o.hist || []).map((h) => `<span><em>${esc(h.t)}</em> <b>${esc(h.status)}</b>${h.descr ? ` <em>· ${esc(h.descr)}</em>` : ''}</span>`).join('');
-  const cs = calls.map((c) => `<details class="call" ${c.ok ? '' : 'open'}><summary><i class="dot ${c.ok ? 'ok' : 'bad'}"></i><span class="psp">${({ payu: 'PayU', cielo: 'Cielo', kushki: 'Kushki', payvalida: 'Payvalida', wepayments: 'WePayments' })[c.psp] || c.psp}</span>
+  const cs = calls.map((c) => `<details class="call" ${c.ok ? '' : 'open'}><summary><i class="dot ${c.ok ? 'ok' : 'bad'}"></i><span class="psp">${esc(name(c.psp))}</span>
       <span class="meta">${esc(c.method)} ${esc(c.path)} · ${c.ms} ms · HTTP ${c.status}</span><span class="res ${c.ok ? 'ok' : 'bad'}">${esc(c.text)}</span></summary>
       <div class="cols"><div><h4>Enviado</h4><pre>${esc(JSON.stringify(c.req, null, 2) ?? '(sem corpo)')}</pre></div><div><h4>Recebido</h4><pre>${esc(JSON.stringify(c.res, null, 2) ?? '(sem corpo)')}</pre></div></div></details>`).join('');
   $('log').innerHTML = `<h3>Log da transação</h3><div class="tl">${tl}</div>` + (cs || '<div class="hint">Nenhuma chamada a PSP capturada para este pedido (a captura só vale para pedidos feitos depois de ligar o proxy).</div>');
 }
 
-const FLOW_PSPS = { CREDIT_CARD: ['Cielo', 'PayU', 'Kushki'], PIX: ['WePayments'], CASH: ['WePayments', 'Payvalida', 'Kushki'], TRANSFER: ['Payvalida', 'Kushki'] };
-// Pix, boleto and transfer flows are small, so they are drawn from a spec: nodes [id, x, y, label, sub, shape] and edges [from, to, label, dashed]
-const FLOW_SPEC = {
-  PIX: { n: [['s', 30, 100, 'Compra'], ['wepayments', 420, 100, 'WePayments', 'único PSP do Pix']], e: [['s', 'wepayments']] },
-  CASH: { n: [['s', 30, 100, 'Compra'], ['m', 260, 112, 'Moeda', 'é BRL ?', 'd'], ['wepayments', 700, 20, 'WePayments', 'BRL'], ['payvalida', 700, 105, 'Payvalida', 'COP · 1ª opção'], ['kushki', 700, 185, 'Kushki', 'COP · fallback']],
-    e: [['s', 'm'], ['m', 'wepayments', 'SIM'], ['m', 'payvalida', 'NÃO (COP)'], ['payvalida', 'kushki', 'se falhar', 1]] },
-  TRANSFER: { n: [['s', 30, 100, 'Compra'], ['payvalida', 420, 60, 'Payvalida', '1ª opção'], ['kushki', 420, 150, 'Kushki', 'fallback']], e: [['s', 'payvalida'], ['payvalida', 'kushki', 'se falhar', 1]] }
-};
-function drawOther(method, o) {
-  const spec = FLOW_SPEC[method]; if (!spec) return;
-  const a = o && o.method === method ? analyse(o, data.threshold) : null;
-  const tried = {};
-  for (const x of (a && o.attempts) || []) { const t = tried[x.psp]; tried[x.psp] = t === undefined ? x.ok : (t && x.ok); }
-  const cop = o && (o.currency || 'BRL') !== 'BRL';
-  const pos = Object.fromEntries(spec.n.map((n) => [n[0], n]));
-  const W = 150, H = 52;
-  const state = (id) => { if (!a) return ''; if (id === 's' || id === 'm') return 'on'; return id in tried ? (tried[id] ? (a.partial ? 'warn' : 'ok') : 'bad') : ''; };
-  const edgeOn = (f, t) => { if (!a) return false; if (f === 's') return true; if (f === 'm') return t === 'wepayments' ? !cop : cop; return t in tried; };
-  const side = (n, k) => (n[5] === 'd' ? { l: [n[1] - 70, n[2]], r: [n[1] + 70, n[2]], b: [n[1], n[2] + 40] } : { l: [n[1], n[2] + H / 2], r: [n[1] + W, n[2] + H / 2], b: [n[1] + W / 2, n[2] + H] })[k];
-  let svg = '';
-  for (const [f, t, label, dashed] of spec.e) {
-    const A = pos[f], B = pos[t];
-    const from = dashed ? side(A, 'b') : side(A, 'r'), to = dashed ? [B[1] + W / 2, B[2]] : side(B, 'l');
-    const d = dashed ? `M${from[0]} ${from[1]} V ${to[1]}` : `M${from[0]} ${from[1]} C ${from[0] + 60} ${from[1]} ${to[0] - 60} ${to[1]} ${to[0]} ${to[1]}`;
-    const on = edgeOn(f, t), bad = dashed && a && tried[f] === false && on;
-    svg += `<path class="edge${dashed ? ' dash' : ''}${on ? ' on' : ''}${bad ? ' bad' : ''}" d="${d}"/>`;
-    if (label) svg += `<text class="tag ${on ? 's' : 'n'}" x="${dashed ? from[0] + 12 : (from[0] + to[0]) / 2 - 20}" y="${dashed ? (from[1] + to[1]) / 2 + 4 : (from[1] + to[1]) / 2 - 8}">${label}</text>`;
-  }
-  for (const n of spec.n) {
-    const st = state(n[0]);
-    if (n[5] === 'd') svg += `<g class="node ${st}"><polygon points="${n[1]},${n[2] - 40} ${n[1] + 70},${n[2]} ${n[1]},${n[2] + 40} ${n[1] - 70},${n[2]}"/><text x="${n[1]}" y="${n[2] - 4}">${n[3]}</text><text class="sub" x="${n[1]}" y="${n[2] + 14}">${n[4]}</text></g>`;
-    else svg += `<g class="node ${st}"><rect x="${n[1]}" y="${n[2]}" width="${W}" height="${H}" rx="12"/><text x="${n[1] + W / 2}" y="${n[2] + 24}">${n[3]}</text><text class="sub" x="${n[1] + W / 2}" y="${n[2] + 42}">${n[0] === 's' && o && o.method === method ? brl(o.amount, o.currency) : (n[4] || '')}</text></g>`;
-  }
-  $('svg2').innerHTML = svg;
-}
-
+let tabSig = '';
 function render() {
-  const { orders, threshold } = data;
-  $('valor-l2').textContent = brl(threshold * 100) + ' ?';
-  const an = orders.map((o) => analyse(o, threshold));
+  const { orders } = data, trees = data.trees || {};
+  // one tab per payment method that has an active flow in the database
+  const methods = [...new Set(['CREDIT_CARD', ...Object.keys(trees)])].sort((x, y) => (ORDER.indexOf(x) + 1 || 99) - (ORDER.indexOf(y) + 1 || 99));
+  if (methods.join() !== tabSig) {
+    tabSig = methods.join();
+    $('tabs').innerHTML = methods.map((m) => `<button data-m="${m}">${esc(LAB[m] || m)}</button>`).join('');
+    $('tabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { pinned = pinned === b.dataset.m ? null : b.dataset.m; last = ''; render(); }));
+  }
+  const an = orders.map(analyse);
   $('k-total').textContent = an.filter((a) => !a.expired).length;
   $('k-ok').textContent = an.filter((a) => a.done).length;
   $('k-fb').textContent = an.filter((a) => a.fallback).length;
@@ -327,20 +384,22 @@ function render() {
     const a = an[i], el = document.createElement('div');
     el.className = 'ord' + (o.id === (selected ?? orders[0]?.id) ? ' sel' : '') + (!seen.has(o.id) ? ' new' : '') + (a.expired ? ' exp' : '');
     seen.add(o.id);
-    el.innerHTML = `<div class="top"><b>${brl(o.amount, o.currency)}</b><span class="chip ${a.expired ? 'EXPIRED' : o.status}">${a.expired ? 'EXPIRADO' : ({WAITING_PSP_PAYMENT:'AGUARDA PAGAMENTO',APPROVED:'APROVADO',ERROR:'ERRO',DENIED:'NEGADO',WAITING_CUSTOMER_PAYMENT:'AGUARDANDO'})[o.status] || o.status}</span></div>
-      <div class="path">${a.path.map((p) => p.includes('✗') ? `<span class="x">${p}</span>` : p.includes('⚠') ? `<span style="color:var(--warn)">${p}</span>` : p.includes('✓') ? `<span class="v">${p}</span>` : p).join(' → ')}</div>`;
+    el.innerHTML = `<div class="top"><b>${brl(o.amount, o.currency)}</b><span class="chip ${a.expired ? 'EXPIRED' : o.status}">${a.expired ? 'EXPIRADO' : ({ WAITING_PSP_PAYMENT: 'AGUARDA PAGAMENTO', APPROVED: 'APROVADO', ERROR: 'ERRO', DENIED: 'NEGADO', WAITING_CUSTOMER_PAYMENT: 'AGUARDANDO' })[o.status] || o.status}</span></div>
+      <div class="path">${a.path.map((p) => esc(p)).map((p) => p.includes('✗') ? `<span class="x">${p}</span>` : p.includes('⚠') ? `<span style="color:var(--warn)">${p}</span>` : p.includes('✓') ? `<span class="v">${p}</span>` : p).join(' → ')}</div>`;
     el.onclick = () => { selected = o.id; last = ''; render(); };
     feed.appendChild(el);
   });
   const cur = orders.find((o) => o.id === (selected ?? orders[0]?.id)) || orders[0];
-  const shown = pinned || cur?.method || 'CREDIT_CARD';
+  const shown = pinned || (cur ? methodOf(cur) : 'CREDIT_CARD');
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.m === shown));
-  const fname = (data.flows || {})[shown];
-  $('flowname').innerHTML = fname ? `Fluxo ativo: <b>${esc(fname)}</b>${(FLOW_PSPS[shown] || []).map((p) => `<span>${p}</span>`).join('')}` : 'Nenhum fluxo ativo para este meio';
-  $('flow-card').style.display = shown === 'CREDIT_CARD' ? '' : 'none';
-  $('flow-other').style.display = shown === 'CREDIT_CARD' ? 'none' : '';
-  if (shown !== 'CREDIT_CARD') drawOther(shown, cur);
-  if (cur) { const sig = JSON.stringify([cur.id, cur.status, cur.psp, cur.hist?.length, analyse(cur, threshold).expired, pinned, (cur.attempts || []).length]); if (sig !== last) { last = sig; paint(cur); } paintLog(cur); }
+  const tree = trees[shown];
+  const psps = tree ? [...new Set(Object.values(tree.nodes).flatMap((r) => r.psps || []))] : [];
+  $('flowname').innerHTML = tree ? `Fluxo ativo: <b>${esc(tree.name)}</b>${psps.map((p) => `<span>${esc(p)}</span>`).join('')}` : 'Nenhum fluxo ativo para este meio';
+  // redraw only when something changed (the flow itself included), so the animations keep running
+  const a = cur ? analyse(cur) : null;
+  const sig = JSON.stringify([shown, tree, cur && [cur.id, cur.status, cur.psp, cur.hist?.length, (cur.attempts || []).length, a.expired], pinned]);
+  if (sig !== last) { last = sig; drawFlow(shown, cur); if (cur) paint(cur); }
+  if (cur) paintLog(cur);
 }
 
 async function tick() {
@@ -350,7 +409,6 @@ async function tick() {
     render(); } catch (e) { /* servidor reiniciando */ }
   setTimeout(tick, 1000);
 }
-document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => { pinned = pinned === b.dataset.m ? null : b.dataset.m; last = ''; render(); }));
 document.querySelectorAll('.go button[data-k]').forEach((b) => b.addEventListener('click', async () => {
   b.disabled = true;
   try { await fetch('/painel/disparar/' + b.dataset.k, { method: 'POST' }); } catch (e) { /* o painel mostra o resultado */ }
